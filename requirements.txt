@@ -1,0 +1,9 @@
+# ติดตั้งแล้วใน venv/ (Python 3.12.10) — รันโปรแกรมด้วย venv\Scripts\python.exe เสมอ
+# ⚠️ ห้ามใช้คำสั่ง python เฉยๆ — เครื่องนี้มี Python ของ MSYS2 แฝงอยู่ ใช้กับ OpenCV ไม่ได้
+# ถ้าต้องลงใหม่: venv\Scripts\python.exe -m pip install -r requirements.txt
+
+pyfirmata2        # คุยกับ Arduino (StandardFirmata) — ห้ามใช้ pyfirmata ตัวเก่า มันพังบน Python 3.11+
+opencv-python     # อ่านกล้อง + ประมวลผลภาพ
+numpy
+Pillow            # แสดงวิดีโอใน tkinter UI
+ultralytics       # YOLOv8 (ทางหลักของ vision) — ถ้าเน็ตช้า/ลงไม่ได้ ใช้ HSV ไปก่อน

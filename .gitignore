@@ -1,0 +1,20 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# ไฟล์ใหญ่ / ผลลัพธ์ระหว่างทาง — ไม่ควรอยู่ใน git
+dataset/
+models/*.pt
+yolov8n.pt
+runs/
+snap_*.jpg
+
+# IDE / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+
+# สไลด์อาจารย์ - ลิขสิทธิ์ผู้สอน ไม่เผยแพร่
+Introduction and mini project 1.pdf
