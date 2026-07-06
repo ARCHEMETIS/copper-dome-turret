@@ -81,7 +81,7 @@
 | ชิ้นส่วน | โมเดลต้นทาง | การดัดแปลง |
 |---|---|---|
 | **ตัวยิง flywheel + feeder + แมกกาซีน** | [HIGH-SPEED Ping-Pong Ball Shooter XRP](https://www.printables.com/model/951454-high-speed-ping-pong-ball-shooter-xrp) (Printables #951454) | สเกลช่องยิงตาม Ø ลูกบอลไม้จริง — ลูกไม้**แข็งไม่ยุบ**ต่างจากปิงปอง ระยะห่างล้อต้อง = Ø ลูก − 1–2 mm ให้ยางหุ้มล้อเป็นตัวยุบแทน, ล้อพิมพ์ infill 50%+ เพิ่มมวลกันรอบตก, เช็ครูเพลามอเตอร์ (2 vs 2.3 mm) |
-| **ฐาน Pan-Tilt** | [Pan-Tilt for MG995/MG996/DS3218](https://www.thingiverse.com/thing:3458238) (สกรู M3×10) | MG945 ใช้เคสเดียวกับ MG995/996 จึง mount ร่วมกันได้ — ใช้เฉพาะแกน pan (มุมเงยล็อกตายตัว ~25–30° เพื่อลดตัวแปร), เสริม bearing/แหวนรองถ้าแท่นโยก |
+| **ฐาน Pan-Tilt** | [Pan-Tilt for MG995/MG996/DS3218](https://www.thingiverse.com/thing:3458238) (สกรู M3×10) | MG945 ใช้เคสเดียวกับ MG995/996 จึง mount ร่วมกันได้ — ใช้เฉพาะแกน pan, มุมเงยล็อกตายตัว **~30–35°** (จากการวิเคราะห์ projectile: ที่มุม ≤25° ความสัมพันธ์ความเร็ว↔ระยะไม่ monotonic เพราะเป้าสูงกว่าปากกระบอก — ดู `tools/ballistics_calc.py`), เสริม bearing/แหวนรองถ้าแท่นโยก |
 | **ที่จับมือถือ** | [Phone holder with bracket](https://www.printables.com/model/472468) (Printables #472468) | ยึดบนส่วนหมุนของป้อม ให้แกนเลนส์ขนานลำกล้อง — กล้องหมุนตามป้อม (หัวใจของ visual servoing) |
 
 *เครดิตโมเดลทั้งหมดเป็นของผู้ออกแบบต้นทางตามลิขสิทธิ์ที่ระบุในแต่ละหน้าโมเดล — ใช้เพื่อการศึกษา*
@@ -119,7 +119,9 @@ tools/                      สคริปต์สนับสนุน
 ├── test_hardware.py        ทดสอบ servo/ล้อ/feeder ด้วยคีย์บอร์ด (รันก่อนทุกไฟล์)
 ├── calibrate_focal.py      หา focal length ของกล้อง (ROI selection)
 ├── calibrate_pwm.py        เก็บตาราง duty↔ระยะจากการยิงจริง
-└── capture_dataset.py      ถ่ายภาพ dataset สำหรับเทรน YOLO
+├── capture_dataset.py      ถ่ายภาพ dataset สำหรับเทรน YOLO
+├── ballistics_calc.py      ตารางคำนวณ projectile (ใช้เลือกมุมเงย + ประกอบสไลด์)
+└── smoke_test.py           ทดสอบทั้ง loop อัตโนมัติบน simulator (regression test)
 
 learn/                      บทเรียน computer vision 5 บท (รันได้โดยไม่มีฮาร์ดแวร์)
 ├── 01_camera.py … 05_yolo_demo.py   จากเปิดกล้อง → HSV → tracking → ranging → YOLO
@@ -140,6 +142,13 @@ venv\Scripts\python.exe tools\test_hardware.py
 venv\Scripts\python.exe src\main.py
 ```
 
+**ยังไม่มีฮาร์ดแวร์?** รันโหมดจำลองได้ทั้งระบบ — ป้อมเสมือน + สนามเสมือนที่สุ่มตำแหน่งเป้าใหม่ทุกนัด ใช้โค้ด vision/aiming/ranging ตัวจริงทั้งหมด:
+
+```powershell
+venv\Scripts\python.exe src\main.py --sim        # UI เต็ม เลือกเป้า กดยิง ดูสถิติโดน/พลาด
+venv\Scripts\python.exe tools\smoke_test.py      # ทดสอบอัตโนมัติ 9 นัด (ต้องผ่านก่อน commit)
+```
+
 ## 🧠 Vision: สองโหมดสลับได้
 
 | | HSV segmentation | YOLOv8n (fine-tuned) |
@@ -155,6 +164,8 @@ venv\Scripts\python.exe src\main.py
 - [x] ออกแบบระบบ + วิเคราะห์ความเสี่ยง
 - [x] โครงสร้างโค้ดครบทุกโมดูล (vision / aiming / ranging / hardware / UI / calibration tools)
 - [x] ชุดบทเรียน vision สำหรับฝึกก่อนได้อุปกรณ์
+- [x] Simulator + smoke test: พิสูจน์ loop เล็ง→วัดระยะ→ยิง ครบวงจร (9/9 ใน sim)
+- [x] วิเคราะห์ ballistics → เลือกมุมเงย 30–35° (หลีกเลี่ยงช่วง non-monotonic)
 - [ ] ประกอบฮาร์ดแวร์ + พิมพ์ชิ้นส่วน 3D
 - [ ] Calibrate: focal length, ตาราง PWM↔ระยะ, จูน servo
 - [ ] เก็บ dataset + เทรน YOLOv8n

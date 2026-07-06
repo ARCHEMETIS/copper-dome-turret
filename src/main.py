@@ -1,10 +1,12 @@
 # =============================================================
 # main.py — โปรแกรมหลัก: UI เลือกเป้า + วิดีโอสด + ปุ่มยิง
-# รัน:  cd src  แล้ว  python main.py
+# รันกับของจริง:  venv\Scripts\python.exe src\main.py
+# รันโหมดจำลอง:   venv\Scripts\python.exe src\main.py --sim   (ไม่ต้องมี Arduino/กล้อง)
 #
 # ลำดับการทำงานตอนกด FIRE:
 #   เล็ง (aiming) → วัดระยะ (ranging) → คำนวณ duty → ยิง (hardware)
 # =============================================================
+import sys
 import threading
 import tkinter as tk
 
@@ -24,9 +26,14 @@ class App:
         self.root = root
         root.title("Copper Dome — Turret Control")
 
-        self.cap = camera.open_camera()
+        if "--sim" in sys.argv:
+            import simulator
+            self.cap, self.turret = simulator.create_sim()
+            root.title("Copper Dome — SIMULATION MODE")
+        else:
+            self.cap = camera.open_camera()
+            self.turret = hardware.Turret()
         self.detector = detector_mod.get_detector()
-        self.turret = hardware.Turret()
 
         self.busy = False           # กันกดยิงซ้อนระหว่างกำลังเล็ง/ยิง
         self.target = tk.StringVar(value="dino")
