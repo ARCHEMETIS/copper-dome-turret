@@ -16,6 +16,10 @@ snap_*.jpg
 Thumbs.db
 desktop.ini
 
+# Jupyter (learn/notebooks/) — checkpoint ชั่วคราว + โมเดล YOLO ที่โหลดมาตอนรันบทที่ 5
+.ipynb_checkpoints/
+learn/notebooks/yolov8n.pt
+
 # สไลด์อาจารย์ - ลิขสิทธิ์ผู้สอน ไม่เผยแพร่
 Introduction and mini project 1.pdf
 

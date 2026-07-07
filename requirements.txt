@@ -7,3 +7,9 @@ opencv-python     # อ่านกล้อง + ประมวลผลภา
 numpy
 Pillow            # แสดงวิดีโอใน tkinter UI
 ultralytics       # YOLOv8 (ทางหลักของ vision) — ถ้าเน็ตช้า/ลงไม่ได้ ใช้ HSV ไปก่อน
+
+# สำหรับบทเรียน learn/notebooks/ (รันแบบ Jupyter ทีละเซลล์)
+notebook
+ipykernel
+ipywidgets
+matplotlib

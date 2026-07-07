@@ -123,8 +123,9 @@ tools/                      สคริปต์สนับสนุน
 ├── ballistics_calc.py      ตารางคำนวณ projectile (ใช้เลือกมุมเงย + ประกอบสไลด์)
 └── smoke_test.py           ทดสอบทั้ง loop อัตโนมัติบน simulator (regression test)
 
-learn/                      บทเรียน computer vision 5 บท (รันได้โดยไม่มีฮาร์ดแวร์)
-├── 01_camera.py … 05_yolo_demo.py   จากเปิดกล้อง → HSV → tracking → ranging → YOLO
+learn/                      บทเรียน computer vision (รันได้โดยไม่มีฮาร์ดแวร์)
+├── notebooks/               Jupyter notebooks 6 บท (00-05) อธิบายทุกบรรทัด + แบบฝึกหัด — ทางหลักสำหรับเรียน
+└── 01_camera.py … 05_yolo_demo.py   เวอร์ชันสคริปต์สด (วิดีโอต่อเนื่อง, แถบเลื่อนลากได้เต็มจอ)
 ```
 
 เอกสารประกอบ (ภาษาไทย): [`docs/แผนโปรเจค-CopperDome.md`](docs/แผนโปรเจค-CopperDome.md) (แผนงาน+วิเคราะห์ความเสี่ยง) และ [`docs/คู่มือโค้ด-อ่านก่อน.md`](docs/คู่มือโค้ด-อ่านก่อน.md) (setup + troubleshooting)
