@@ -128,7 +128,7 @@ learn/                      บทเรียน computer vision (รันไ�
 └── 01_camera.py … 05_yolo_demo.py   เวอร์ชันสคริปต์สด (วิดีโอต่อเนื่อง, แถบเลื่อนลากได้เต็มจอ)
 ```
 
-เอกสารประกอบ (ภาษาไทย): [`docs/แผนโปรเจค-CopperDome.md`](docs/แผนโปรเจค-CopperDome.md) (แผนงาน+วิเคราะห์ความเสี่ยง) และ [`docs/คู่มือโค้ด-อ่านก่อน.md`](docs/คู่มือโค้ด-อ่านก่อน.md) (setup + troubleshooting)
+เอกสารประกอบ (ภาษาไทย): [`docs/แผนโปรเจค-CopperDome.md`](docs/แผนโปรเจค-CopperDome.md) (แผนงาน+วิเคราะห์ความเสี่ยง), [`docs/คู่มือโค้ด-อ่านก่อน.md`](docs/คู่มือโค้ด-อ่านก่อน.md) (setup + troubleshooting) และ [`docs/ROADMAP.md`](docs/ROADMAP.md) (แผนที่การเรียนรู้ vision/robotics อ้างอิงคอร์ส/หนังสือมาตรฐาน)
 
 **เพิ่งเริ่มจากศูนย์?** อ่าน [`START-HERE.md`](START-HERE.md) ก่อนไฟล์อื่นทั้งหมด
 
