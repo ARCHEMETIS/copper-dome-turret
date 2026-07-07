@@ -127,7 +127,9 @@ learn/                      บทเรียน computer vision 5 บท (ร�
 ├── 01_camera.py … 05_yolo_demo.py   จากเปิดกล้อง → HSV → tracking → ranging → YOLO
 ```
 
-เอกสารประกอบ (ภาษาไทย): [`แผนโปรเจค-CopperDome.md`](แผนโปรเจค-CopperDome.md) (แผนงาน+วิเคราะห์ความเสี่ยง) และ [`คู่มือโค้ด-อ่านก่อน.md`](คู่มือโค้ด-อ่านก่อน.md) (setup + troubleshooting)
+เอกสารประกอบ (ภาษาไทย): [`docs/แผนโปรเจค-CopperDome.md`](docs/แผนโปรเจค-CopperDome.md) (แผนงาน+วิเคราะห์ความเสี่ยง) และ [`docs/คู่มือโค้ด-อ่านก่อน.md`](docs/คู่มือโค้ด-อ่านก่อน.md) (setup + troubleshooting)
+
+**เพิ่งเริ่มจากศูนย์?** อ่าน [`START-HERE.md`](START-HERE.md) ก่อนไฟล์อื่นทั้งหมด
 
 ## 🚀 Getting Started
 
