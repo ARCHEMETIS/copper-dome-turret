@@ -7,8 +7,11 @@ __pycache__/
 dataset/
 models/*.pt
 yolov8n.pt
+yolo26n.pt
 runs/
 snap_*.jpg
+*.log
+*.mp4
 
 # IDE / OS
 .vscode/

@@ -58,14 +58,14 @@ TARGETS = {
     "dino": {
         "display": "ไดโนเสาร์เขียว",
         "real_width_mm": 100,          # TODO: วัดจริง
-        "yolo_class": 0,               # ตรงกับลำดับ class ตอนเทรน YOLO
+        "yolo_class": 1,               # ตรงกับลำดับ class ตอนเทรน YOLO (data.yaml: capybara,dino,elephant)
         "hsv_lower": (35, 80, 60),     # ช่วงสีเขียว (สำรอง ถ้า YOLO ไม่ทัน)
         "hsv_upper": (85, 255, 255),
     },
     "capybara": {
         "display": "คาปิบาร่า",
         "real_width_mm": 100,          # TODO: วัดจริง
-        "yolo_class": 1,
+        "yolo_class": 0,
         "hsv_lower": (10, 60, 60),     # น้ำตาล — เสี่ยงชนกับช้าง ควรใช้ YOLO
         "hsv_upper": (25, 255, 255),
     },
@@ -79,7 +79,7 @@ TARGETS = {
 }
 
 # ---------- Vision ----------
-DETECTOR = "hsv"            # "yolo" หรือ "hsv" — เริ่มด้วย hsv ให้ระบบครบ loop ก่อน แล้วค่อยสลับ
+DETECTOR = "yolo"           # "yolo" หรือ "hsv" — เทรน YOLO เสร็จแล้ว (mAP50 0.971)
 YOLO_MODEL_PATH = "models/best.pt"   # ไฟล์ที่ได้จากการเทรน
 YOLO_CONF = 0.5
 HSV_MIN_AREA_PX = 800       # กรอง noise เล็กๆ ทิ้ง
