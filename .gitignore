@@ -6,6 +6,7 @@ __pycache__/
 # ไฟล์ใหญ่ / ผลลัพธ์ระหว่างทาง — ไม่ควรอยู่ใน git
 dataset/
 models/*.pt
+!models/best.pt
 yolov8n.pt
 yolo26n.pt
 runs/

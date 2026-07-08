@@ -56,6 +56,21 @@ venv\Scripts\python.exe src\main.py --sim
 
 ---
 
+### STEP 2.5 — ทดสอบ YOLO กับเว็บแคมจริง (ยังไม่ต้องมี Arduino)
+
+โมเดล YOLO เทรนเสร็จแล้ว (`models/best.pt`, mAP50 0.971) ลองดูว่ามันแยกตุ๊กตาได้จริงไหมผ่านเว็บแคม โดยยังไม่ต้องต่อ Arduino เลย:
+
+```powershell
+venv\Scripts\python.exe tools\test_on_webcam.py
+```
+
+จะเปิดหน้าต่างวิดีโอสดจากกล้อง มีกรอบ+ชื่อ+% ความมั่นใจขึ้นทับเวลาเห็นตุ๊กตา กด **q** เพื่อปิด
+ถ้าไม่มีตุ๊กตาอยู่ตรงหน้า ใช้ไฟล์วิดีโอทดสอบแทนได้ด้วย `venv\Scripts\python.exe tools\test_on_video.py`
+
+✅ ผ่าน STEP 2.5 เมื่อ: เห็นกรอบตรวจจับขึ้นถูกตัวถูกชื่อ (ถ้าตรวจจับพลาดบ่อย ลองปรับแสง/มุม หรือดู `YOLO_CONF` ใน `config.py`)
+
+---
+
 ### STEP 3 — พอได้อุปกรณ์ Arduino จริง
 
 1. อัปโหลดเฟิร์มแวร์ครั้งเดียว: เปิด Arduino IDE → `File > Examples > Firmata > StandardFirmata` → Upload
@@ -81,6 +96,8 @@ venv\Scripts\python.exe src\main.py --sim
 | หัดเขียน vision ทีละขั้น (แบบ notebook อธิบายละเอียด) | `learn/notebooks/` (เริ่มที่ `00_python_numpy_basics.ipynb`) |
 | วิธีเปิด notebook / แก้ปัญหา kernel | `learn/README-บทเรียน.md` |
 | อยากเห็นป้อมทำงานทั้งระบบ (ไม่มีอุปกรณ์) | `venv\Scripts\python.exe src\main.py --sim` |
+| อยากลองเว็บแคมจริงกับ YOLO ที่เทรนแล้ว (ไม่มี Arduino) | `venv\Scripts\python.exe tools\test_on_webcam.py` |
+| ไม่มีตุ๊กตาอยู่ตรงหน้า อยากดูผล YOLO | `venv\Scripts\python.exe tools\test_on_video.py` |
 | ทดสอบว่ามอเตอร์/servo ต่อถูกไหม | `venv\Scripts\python.exe tools\test_hardware.py` |
 | วิธี setup/calibrate/แก้ปัญหาแบบละเอียด | `docs/คู่มือโค้ด-อ่านก่อน.md` |
 | แผนงาน/เกณฑ์คะแนน/timeline | `docs/แผนโปรเจค-CopperDome.md` |

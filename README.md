@@ -121,6 +121,8 @@ tools/                      สคริปต์สนับสนุน
 ├── calibrate_pwm.py        เก็บตาราง duty↔ระยะจากการยิงจริง
 ├── capture_dataset.py      ถ่ายภาพ dataset สำหรับเทรน YOLO
 ├── test_on_video.py        รันโมเดล YOLO ที่เทรนแล้วกับไฟล์วิดีโอ (เดโมไม่ต้องมีตุ๊กตา/กล้อง)
+├── test_on_webcam.py       รันโมเดล YOLO กับเว็บแคมจริงสดๆ (ไม่ต้องมี Arduino)
+├── resplit_dataset.py      แบ่ง train/valid/test ใหม่แบบจัดกลุ่มตามคลิปต้นทาง (กัน data leakage)
 ├── ballistics_calc.py      ตารางคำนวณ projectile (ใช้เลือกมุมเงย + ประกอบสไลด์)
 └── smoke_test.py           ทดสอบทั้ง loop อัตโนมัติบน simulator (regression test)
 
@@ -163,7 +165,9 @@ venv\Scripts\python.exe tools\smoke_test.py      # ทดสอบอัตโ�
 
 สลับด้วยตัวแปรเดียว: `DETECTOR = "hsv" | "yolo"` ใน `config.py` — ทั้งคู่ implement interface `detect(frame, target) -> Detection` เหมือนกัน
 
-**สถานะ YOLO:** เทรนเสร็จแล้วจากรูปที่ถ่าย+ label เอง 770 รูป (ผ่าน Roboflow) — `yolov8n`, 60 epochs บน GPU, **mAP50 0.971 / mAP50-95 0.773** (capybara 0.980, dino 0.946, elephant 0.985) ไฟล์โมเดลอยู่ที่ `models/best.pt` ทดสอบเร็วๆ โดยไม่ต้องมีตุ๊กตาจริงด้วย `venv\Scripts\python.exe tools\test_on_video.py`
+**สถานะ YOLO:** เทรนเสร็จแล้วจากรูปที่ถ่าย+ label เอง 770 รูป (ผ่าน Roboflow) — `yolov8n`, 60 epochs บน GPU, **mAP50 0.988 / mAP50-95 0.787** (capybara 0.983, dino 0.990, elephant 0.990) ไฟล์โมเดลอยู่ที่ `models/best.pt` (commit เข้า git ไว้แล้ว ไม่ใช่แค่ในเครื่อง) ทดสอบเร็วๆ โดยไม่ต้องมีตุ๊กตาจริงด้วย `venv\Scripts\python.exe tools\test_on_webcam.py` (เว็บแคมสด) หรือ `tools\test_on_video.py` (จากไฟล์วิดีโอ)
+
+⚠️ split train/valid/test แบ่งแบบ**จัดกลุ่มตามคลิปต้นทาง** (`tools/resplit_dataset.py`) — ไม่ใช่สุ่มทีละรูปแบบที่ Roboflow ทำให้อัตโนมัติ เพราะรูปที่ตัดมาจากวิดีโอเดียวกันจะเกือบเหมือนกันทุกพิกเซล ถ้าสุ่มแบบรายรูปจะมีเฟรมพี่น้องรั่วข้าม split ทำให้ mAP สูงเกินจริง (data leakage) ถ้า generate version ใหม่จาก Roboflow อีกครั้งต้องรัน `resplit_dataset.py` ซ้ำก่อนเทรนเสมอ
 
 ## 📊 สถานะโปรเจค
 
@@ -172,7 +176,7 @@ venv\Scripts\python.exe tools\smoke_test.py      # ทดสอบอัตโ�
 - [x] ชุดบทเรียน vision สำหรับฝึกก่อนได้อุปกรณ์
 - [x] Simulator + smoke test: พิสูจน์ loop เล็ง→วัดระยะ→ยิง ครบวงจร (9/9 ใน sim)
 - [x] วิเคราะห์ ballistics → เลือกมุมเงย 30–35° (หลีกเลี่ยงช่วง non-monotonic)
-- [x] เก็บ dataset (770 รูป, label เอง) + เทรน YOLOv8n — mAP50 0.971 / mAP50-95 0.773, `DETECTOR = "yolo"` เป็นค่าเริ่มต้นแล้ว
+- [x] เก็บ dataset (770 รูป, label เอง) + เทรน YOLOv8n บน split ที่จัดกลุ่มตามคลิปต้นทาง (กัน leakage) — mAP50 0.988 / mAP50-95 0.787, `DETECTOR = "yolo"` เป็นค่าเริ่มต้นแล้ว, `models/best.pt` commit เข้า git แล้ว
 - [ ] ประกอบฮาร์ดแวร์ + พิมพ์ชิ้นส่วน 3D
 - [ ] Calibrate: focal length, ตาราง PWM↔ระยะ, จูน servo
 - [ ] ทดสอบรวมระบบ + เก็บสถิติความแม่น (เป้า >5/10 แบบมี margin)
