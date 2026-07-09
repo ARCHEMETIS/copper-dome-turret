@@ -15,9 +15,15 @@ def open_camera() -> cv2.VideoCapture:
         if cap.isOpened():
             ok, _ = cap.read()
             if ok:
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.FRAME_WIDTH)
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.FRAME_HEIGHT)
-                print(f"[camera] เปิดกล้อง index {i} สำเร็จ")
+                # ตั้ง resolution เฉพาะตอนที่ไม่ตรงเท่านั้น — สั่ง set ใส่กล้องเสมือน
+                # (Camo/DroidCam) ทั้งที่ค่าตรงอยู่แล้ว จะทำ stream พังค้างเป็นจอดำ
+                # จนต้องรีสตาร์ทแอปกล้อง (เจอจริงกับ Camo บนเครื่องนี้)
+                w = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+                h = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+                if (int(w), int(h)) != (config.FRAME_WIDTH, config.FRAME_HEIGHT):
+                    cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.FRAME_WIDTH)
+                    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.FRAME_HEIGHT)
+                print(f"[camera] เปิดกล้อง index {i} สำเร็จ ({int(w)}x{int(h)})")
                 return cap
         cap.release()
     raise RuntimeError(

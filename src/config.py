@@ -47,7 +47,7 @@ PWM_DISTANCE_TABLE = [
 ]
 
 # ---------- กล้อง ----------
-CAMERA_INDEX = None         # None = ไล่หา index 0-5 อัตโนมัติ
+CAMERA_INDEX = 1            # 1 = Camo (มือถือ) | 0 = กล้องโน้ตบุ๊ก | None = ไล่หาอัตโนมัติ
 FRAME_WIDTH = 1280
 FRAME_HEIGHT = 720
 
