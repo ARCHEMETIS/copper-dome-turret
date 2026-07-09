@@ -134,8 +134,14 @@ class SimCamera:
 
 
 def create_sim():
-    """สร้างชุดจำลองครบ + ตั้ง FOCAL_PX ให้ ranging ใช้ได้ทันที"""
+    """สร้างชุดจำลองครบ + ตั้ง FOCAL_PX/real_size_mm ให้ ranging ใช้ได้ทันที"""
     config.FOCAL_PX = SIM_FOCAL_PX
+    # ranging ใช้ √(w·h) ของกรอบ — รูปที่ซิมวาด (ตัวรี 1.2·w + หัวโผล่นิดหน่อย)
+    # มีกรอบสูง ≈ 1.217 เท่าของความกว้าง → ขนาดผลจริงของเป้าจำลอง
+    # = real_width_mm · √1.217 ≈ ×1.103 (ถ้าแก้รูปทรงที่วาดใน SimCamera.read
+    # ต้องอัพเดตตัวคูณนี้ด้วย — smoke test จะจับได้ถ้าลืม)
+    for t in config.TARGETS.values():
+        t["real_size_mm"] = t["real_width_mm"] * 1.103
     world = SimWorld()
     turret = SimTurret(world)
     camera = SimCamera(world, turret)

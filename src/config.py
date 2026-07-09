@@ -51,30 +51,43 @@ CAMERA_INDEX = 1            # 1 = Camo (มือถือ) | 0 = กล้อ�
 FRAME_WIDTH = 1280
 FRAME_HEIGHT = 720
 
-# focal length เป็น pixel — ได้จาก tools/calibrate_focal.py
+# focal length เป็น pixel — fit จากรูปชุด Distance/ ด้วย tools/fit_focal.py
 # สูตร: ระยะ_mm = FOCAL_PX * ขนาดจริง_mm / ขนาดใน_ภาพ_px
-FOCAL_PX = None             # TODO: calibrate ก่อน (ล็อก focus มือถือแล้วห้ามแตะอีก!)
+# ⚠ ค่านี้สเกลมาจากรูปโหมดถ่ายภาพ iPhone (4064px → 1280px) — FOV โหมดรูปกับ
+# โหมดวิดีโอ Camo อาจไม่เท่ากัน TODO: ถ่ายผ่าน Camo ที่ระยะที่รู้ 1-2 รูปเพื่อยืนยัน
+# (ล็อก focus/zoom มือถือแล้วห้ามแตะอีก ไม่งั้นค่านี้เพี้ยนทั้งระบบ!)
+FOCAL_PX = 1400
 
 # ---------- เป้า 3 ตัว ----------
-# real_width_mm = ความกว้างจริงของตุ๊กตา (วัดด้วยไม้บรรทัด แนวเดียวกับที่กล้องเห็น)
+# real_size_mm = ขนาด "ผลจริง" √(กว้าง·สูง) ที่กรอบ YOLO เห็น — fit จากรูปชุด
+# Distance/ ด้วย tools/fit_focal.py — ranging ใช้ค่านี้ (√(w·h) ทนท่าวางแปลกๆ
+# วันแข่งได้ดีสุด: หมุนตุ๊กตาแล้ว w↔h สลับกันแต่ √(w·h) แทบไม่เปลี่ยน)
+# real_width_mm = ความกว้างผลจริง (fit เช่นกัน) — เหลือไว้ให้ simulator วาดเป้า
+# ค่าพวกนี้ยังใช้ได้แม้ FOCAL_PX จะถูกปรับตอนยืนยันผ่าน Camo
+# (FOV เปลี่ยน = px ทุกอย่างสเกลเท่ากัน แก้ที่ FOCAL_PX ตัวเดียวพอ)
+# ⚠ TODO: ค่าเหล่านี้คาลิเบรตกับกรอบของโมเดลรอบแรก — เทรนรอบ 2 แล้ว (10 ก.ค.)
+# ต้องเก็บข้อมูลใหม่ด้วย tools/collect_ranging_data.py แล้ว fit ซ้ำ
 TARGETS = {
     "dino": {
         "display": "ไดโนเสาร์เขียว",
-        "real_width_mm": 100,          # TODO: วัดจริง
+        "real_size_mm": 167,           # ถ่วงกลางจากวัดจริง 7 ท่า @100cm (ตรวจจับ.xlsx)
+        "real_width_mm": 145,
         "yolo_class": 1,               # ตรงกับลำดับ class ตอนเทรน YOLO (data.yaml: capybara,dino,elephant)
         "hsv_lower": (35, 80, 60),     # ช่วงสีเขียว (สำรอง ถ้า YOLO ไม่ทัน)
         "hsv_upper": (85, 255, 255),
     },
     "capybara": {
         "display": "คาปิบาร่า",
-        "real_width_mm": 100,          # TODO: วัดจริง
+        "real_size_mm": 134,           # ถ่วงกลางจากวัดจริง 6 ท่า @100cm (ตรวจจับ.xlsx)
+        "real_width_mm": 118,
         "yolo_class": 0,
         "hsv_lower": (10, 60, 60),     # น้ำตาล — เสี่ยงชนกับช้าง ควรใช้ YOLO
         "hsv_upper": (25, 255, 255),
     },
     "elephant": {
         "display": "ช้างเทา",
-        "real_width_mm": 100,          # TODO: วัดจริง
+        "real_size_mm": 163,           # ถ่วงกลางจากวัดจริง 6 ท่า @100cm (ตรวจจับ.xlsx)
+        "real_width_mm": 185,
         "yolo_class": 2,
         "hsv_lower": (0, 0, 40),       # เทา — HSV แยกยากมาก ควรใช้ YOLO
         "hsv_upper": (180, 40, 200),
@@ -82,7 +95,7 @@ TARGETS = {
 }
 
 # ---------- Vision ----------
-DETECTOR = "yolo"           # "yolo" หรือ "hsv" — เทรน YOLO เสร็จแล้ว (mAP50 0.971)
+DETECTOR = "yolo"           # "yolo" หรือ "hsv" — YOLO เทรนรอบ 2 แล้ว (mAP50 0.968 valid / 0.937 test)
 # ผูกกับตำแหน่งโปรเจคเสมอ (ไม่ใช่ cwd) — ไม่งั้นรันจากโฟลเดอร์อื่นแล้วหาไฟล์ไม่เจอ
 YOLO_MODEL_PATH = str(_PROJECT_ROOT / "models" / "best.pt")
 YOLO_CONF = 0.5
