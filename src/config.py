@@ -3,6 +3,9 @@
 # กติกา: ไฟล์อื่นห้าม hardcode ตัวเลข ให้ import จากที่นี่เท่านั้น
 # ค่าที่ขึ้นต้นด้วย TODO ต้องวัด/จูนจากของจริงก่อนใช้
 # =============================================================
+from pathlib import Path
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # ---------- Serial / Arduino ----------
 SERIAL_PORT = None          # None = ค้นหาอัตโนมัติ, หรือระบุเอง เช่น "COM4"
@@ -80,7 +83,8 @@ TARGETS = {
 
 # ---------- Vision ----------
 DETECTOR = "yolo"           # "yolo" หรือ "hsv" — เทรน YOLO เสร็จแล้ว (mAP50 0.971)
-YOLO_MODEL_PATH = "models/best.pt"   # ไฟล์ที่ได้จากการเทรน
+# ผูกกับตำแหน่งโปรเจคเสมอ (ไม่ใช่ cwd) — ไม่งั้นรันจากโฟลเดอร์อื่นแล้วหาไฟล์ไม่เจอ
+YOLO_MODEL_PATH = str(_PROJECT_ROOT / "models" / "best.pt")
 YOLO_CONF = 0.5
 HSV_MIN_AREA_PX = 800       # กรอง noise เล็กๆ ทิ้ง
 

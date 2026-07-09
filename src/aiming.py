@@ -16,7 +16,6 @@ def aim_at(turret, cap, detector, target: str, on_frame=None):
     """
     deadline = time.time() + config.AIM_TIMEOUT_S
     confirmed = 0
-    last_det = None
 
     while time.time() < deadline:
         ok, frame = cap.read()
@@ -36,7 +35,6 @@ def aim_at(turret, cap, detector, target: str, on_frame=None):
             time.sleep(config.AIM_SETTLE_S)
             continue
 
-        last_det = det
         error_px = det.cx - frame.shape[1] / 2  # +ค่า = เป้าอยู่ขวาของกลางภาพ
 
         if abs(error_px) <= config.AIM_DEADBAND_PX:
@@ -52,4 +50,4 @@ def aim_at(turret, cap, detector, target: str, on_frame=None):
         turret.pan_by(config.AIM_SIGN * step)  # ถ้าหมุนหนีเป้า → แก้ AIM_SIGN ใน config
         time.sleep(config.AIM_SETTLE_S)
 
-    return last_det if confirmed >= config.AIM_CONFIRM_FRAMES else None
+    return None  # หมดเวลา — ถ้าเล็งสำเร็จจะ return ในลูปไปแล้ว (ตรง confirmed ครบ)

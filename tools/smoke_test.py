@@ -18,10 +18,52 @@ import simulator
 from detector import HsvDetector
 
 
+def yolo_leg(failures):
+    """ทดสอบเส้นทาง YOLO ด้วยรูปถ่ายจริงจาก dataset/test (โหมดที่ใช้จริงวันแข่ง)
+
+    เช็ค 2 อย่างพร้อมกัน: โมเดลตรวจจับรูปจริงได้ และ mapping yolo_class ใน
+    config ตรงกับ class ที่โมเดลถูกเทรนมา (กันพลาดตอน export dataset ใหม่
+    แล้วลำดับ class เปลี่ยน)
+    """
+    import cv2
+    from detector import YoloDetector
+
+    test_dir = Path(__file__).resolve().parent.parent / "dataset" / "test"
+    if not test_dir.exists():
+        print("(ข้ามขา YOLO — ไม่มีโฟลเดอร์ dataset/test ในเครื่องนี้)")
+        return
+
+    det = YoloDetector()
+    checked = 0
+    for label_path in sorted((test_dir / "labels").glob("*.txt")):
+        if checked >= 5:
+            break
+        lines = label_path.read_text().strip().splitlines()
+        if len(lines) != 1:
+            continue  # เอาเฉพาะรูปที่มีเป้าตัวเดียว ให้เทียบ class ได้ตรงๆ
+        true_class = int(lines[0].split()[0])
+        true_label = next(k for k, v in config.TARGETS.items()
+                          if v["yolo_class"] == true_class)
+
+        img_path = next(p for p in (test_dir / "images").glob(label_path.stem + ".*"))
+        frame = cv2.imread(str(img_path))
+        d = det.detect(frame, true_label)
+        checked += 1
+        if d is None:
+            failures.append(f"YOLO: ไม่เจอ {true_label} ใน {img_path.name}")
+        else:
+            print(f"YOLO | {img_path.name}: เจอ {true_label} (conf {d.conf:.2f})")
+
+    if checked == 0:
+        failures.append("YOLO: ไม่มีรูป test ที่ใช้เช็คได้เลย (ทุกรูปมีหลายเป้า?)")
+
+
 def main():
     cam, turret = simulator.create_sim()
     det = HsvDetector()
     failures = []
+
+    yolo_leg(failures)
 
     for round_no in range(1, 4):
         for label in config.TARGETS:

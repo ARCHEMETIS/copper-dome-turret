@@ -30,10 +30,13 @@ class App:
             import simulator
             self.cap, self.turret = simulator.create_sim()
             root.title("Copper Dome — SIMULATION MODE")
+            # sim วาดเป้าเป็นวงรีสีทึบ (ออกแบบคู่กับช่วง HSV ใน config)
+            # YOLO เทรนจากรูปถ่ายจริง มองภาพวาดพวกนี้ไม่ออก — ต้องใช้ HSV เสมอในโหมดนี้
+            self.detector = detector_mod.HsvDetector()
         else:
             self.cap = camera.open_camera()
             self.turret = hardware.Turret()
-        self.detector = detector_mod.get_detector()
+            self.detector = detector_mod.get_detector()
 
         self.busy = False           # กันกดยิงซ้อนระหว่างกำลังเล็ง/ยิง
         self.target = tk.StringVar(value="dino")
