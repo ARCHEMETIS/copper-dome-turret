@@ -142,6 +142,10 @@ def create_sim():
     # ต้องอัพเดตตัวคูณนี้ด้วย — smoke test จะจับได้ถ้าลืม)
     for t in config.TARGETS.values():
         t["real_size_mm"] = t["real_width_mm"] * 1.103
+    # ตัวแก้ระยะตามท่า (w/h) fit มาจากตุ๊กตาจริง — เป้าจำลองมีรูปทรงเดียวตายตัว
+    # (w/h ≈ 0.82 ทุกตัว) ไม่มี "ท่า" ให้แก้ ถ้าปล่อยไว้จะโดนคูณ factor ของท่า
+    # ที่ไม่ได้เป็น ทำระยะใน sim เพี้ยน ~10% ทั้งที่โค้ดถูก (smoke test เคยจับได้)
+    config.ASPECT_CORRECTION = {}
     world = SimWorld()
     turret = SimTurret(world)
     camera = SimCamera(world, turret)

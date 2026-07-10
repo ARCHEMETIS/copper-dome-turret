@@ -58,10 +58,50 @@ def yolo_leg(failures):
         failures.append("YOLO: ไม่มีรูป test ที่ใช้เช็คได้เลย (ทุกรูปมีหลายเป้า?)")
 
 
+def ranging_leg(failures):
+    """ทดสอบ ranging + ตัวแก้ตามท่า (ASPECT_CORRECTION) กับกรอบจริง 42 จุด
+    จาก Distance/ranging_log.csv — ทุกจุดต้องเพี้ยนไม่เกิน ±12%
+
+    ⚠ ต้องรันก่อน create_sim() — sim จะเขียนทับ FOCAL_PX/real_size_mm/
+    ASPECT_CORRECTION ใน config ให้เข้ากับเป้าจำลอง (ค่าจริงจะหายไป)
+    """
+    import csv
+
+    from detector import Detection
+
+    csv_path = Path(__file__).resolve().parent.parent / "Distance" / "ranging_log.csv"
+    if not csv_path.exists():
+        print("(ข้ามขา ranging — ไม่มี Distance/ranging_log.csv ในเครื่องนี้)")
+        return
+
+    model_name = Path(config.YOLO_MODEL_PATH).name
+    checked = worst = 0
+    with open(csv_path, encoding="utf-8-sig") as f:
+        for row in csv.DictReader(f):
+            if row.get("โมเดล") != model_name:
+                continue  # ข้อมูลของโมเดลอื่น เทียบกับ config ปัจจุบันไม่ได้
+            det = Detection(row["ตัว"], 0, 0,
+                            float(row["px_w"]), float(row["px_h"]), 1.0)
+            pred_cm = ranging.distance_mm(det) / 10
+            true_cm = float(row["ระยะจริง_cm"])
+            err_pct = abs(pred_cm - true_cm) / true_cm * 100
+            checked += 1
+            worst = max(worst, err_pct)
+            if err_pct > 12:
+                failures.append(f"ranging: {row['ตัว']} ท่า{row['ท่า']} "
+                                f"@{true_cm:g}cm เพี้ยน {err_pct:.0f}%")
+    if checked:
+        print(f"ranging | เช็ค {checked} จุดจาก CSV: เพี้ยนแย่สุด {worst:.1f}%")
+    else:
+        print(f"(ข้ามขา ranging — ใน CSV ไม่มีแถวของโมเดล {model_name})")
+
+
 def main():
+    failures = []
+    ranging_leg(failures)     # ต้องมาก่อน create_sim (sim เขียนทับ config)
+
     cam, turret = simulator.create_sim()
     det = HsvDetector()
-    failures = []
 
     yolo_leg(failures)
 
