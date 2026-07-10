@@ -32,6 +32,7 @@ def draw_detections(frame, model: YOLO):
     focal = None
     if config.FOCAL_PX is not None:
         focal = config.FOCAL_PX * frame.shape[1] / config.FRAME_WIDTH
+    seen_labels = set()
     for box in results[0].boxes:
         x1, y1, x2, y2 = map(int, box.xyxy[0])
         label = model.names[int(box.cls)]
@@ -42,8 +43,14 @@ def draw_detections(frame, model: YOLO):
             size_px = ((x2 - x1) * (y2 - y1)) ** 0.5
             dist_cm = focal * config.TARGETS[label]["real_size_mm"] / size_px / 10
             _dist_hist[label].append(dist_cm)
+            seen_labels.add(label)
             text += f" {statistics.median(_dist_hist[label]):.0f}cm"
         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 3)
         cv2.putText(frame, text, (x1, max(25, y1 - 10)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+
+    # เป้าที่หายจากเฟรม = ถูกย้าย/ถูกบัง — ทิ้งประวัติระยะของมัน ไม่งั้นตอน
+    # โผล่กลับมา median จะปนค่าจากตำแหน่งเก่าไปอีกหลายเฟรม
+    for label in [k for k in _dist_hist if k not in seen_labels]:
+        del _dist_hist[label]
     return frame
