@@ -65,12 +65,14 @@ FOCAL_PX = 1400
 # real_width_mm = ความกว้างผลจริง (fit เช่นกัน) — เหลือไว้ให้ simulator วาดเป้า
 # ค่าพวกนี้ยังใช้ได้แม้ FOCAL_PX จะถูกปรับตอนยืนยันผ่าน Camo
 # (FOV เปลี่ยน = px ทุกอย่างสเกลเท่ากัน แก้ที่ FOCAL_PX ตัวเดียวพอ)
-# ⚠ TODO: ค่าเหล่านี้คาลิเบรตกับกรอบของโมเดลรอบแรก — เทรนรอบ 2 แล้ว (10 ก.ค.)
-# ต้องเก็บข้อมูลใหม่ด้วย tools/collect_ranging_data.py แล้ว fit ซ้ำ
+# คาลิเบรตกับโมเดลรอบ 3 แล้ว (10 ก.ค. — Distance/ranging_log.csv 42 แถว:
+# 2 ระยะ 100/175cm × 7 ท่า × 3 ตัว, median ของขนาดโดยนัย size_px·dist/FOCAL)
+# ความสอดคล้องข้ามระยะดีมาก (ต่างกัน <2%) = ยืนยัน FOCAL_PX 1400 ไปในตัว
+# ⚠ ถ้าเทรนโมเดลใหม่อีกรอบ ต้องเก็บซ้ำด้วย tools/collect_ranging_data.py
 TARGETS = {
     "dino": {
         "display": "ไดโนเสาร์เขียว",
-        "real_size_mm": 167,           # ถ่วงกลางจากวัดจริง 7 ท่า @100cm (ตรวจจับ.xlsx)
+        "real_size_mm": 171,           # median 14 จุด 2 ระยะ×7 ท่า (ranging_log.csv)
         "real_width_mm": 145,
         "yolo_class": 1,               # ตรงกับลำดับ class ตอนเทรน YOLO (data.yaml: capybara,dino,elephant)
         "hsv_lower": (35, 80, 60),     # ช่วงสีเขียว (สำรอง ถ้า YOLO ไม่ทัน)
@@ -78,7 +80,7 @@ TARGETS = {
     },
     "capybara": {
         "display": "คาปิบาร่า",
-        "real_size_mm": 134,           # ถ่วงกลางจากวัดจริง 6 ท่า @100cm (ตรวจจับ.xlsx)
+        "real_size_mm": 138,           # median 14 จุด 2 ระยะ×7 ท่า (ranging_log.csv)
         "real_width_mm": 118,
         "yolo_class": 0,
         "hsv_lower": (10, 60, 60),     # น้ำตาล — เสี่ยงชนกับช้าง ควรใช้ YOLO
@@ -86,7 +88,7 @@ TARGETS = {
     },
     "elephant": {
         "display": "ช้างเทา",
-        "real_size_mm": 163,           # ถ่วงกลางจากวัดจริง 6 ท่า @100cm (ตรวจจับ.xlsx)
+        "real_size_mm": 161,           # median 14 จุด 2 ระยะ×7 ท่า (ranging_log.csv)
         "real_width_mm": 185,
         "yolo_class": 2,
         "hsv_lower": (0, 0, 40),       # เทา — HSV แยกยากมาก ควรใช้ YOLO
@@ -95,7 +97,7 @@ TARGETS = {
 }
 
 # ---------- Vision ----------
-DETECTOR = "yolo"           # "yolo" หรือ "hsv" — YOLO เทรนรอบ 2 แล้ว (mAP50 0.968 valid / 0.937 test)
+DETECTOR = "yolo"           # "yolo" หรือ "hsv" — YOLO เทรนรอบ 3 แล้ว (mAP50 0.963 valid / 0.965 test + ลด ghost ด้วย background 138 รูป)
 # ผูกกับตำแหน่งโปรเจคเสมอ (ไม่ใช่ cwd) — ไม่งั้นรันจากโฟลเดอร์อื่นแล้วหาไฟล์ไม่เจอ
 YOLO_MODEL_PATH = str(_PROJECT_ROOT / "models" / "best.pt")
 YOLO_CONF = 0.5
