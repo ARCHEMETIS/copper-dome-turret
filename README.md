@@ -165,7 +165,7 @@ venv\Scripts\python.exe tools\smoke_test.py      # ทดสอบอัตโ�
 
 สลับด้วยตัวแปรเดียว: `DETECTOR = "hsv" | "yolo"` ใน `config.py` — ทั้งคู่ implement interface `detect(frame, target) -> Detection` เหมือนกัน
 
-**สถานะ YOLO:** เทรนเสร็จแล้วจากรูปที่ถ่าย+ label เอง 770 รูป (ผ่าน Roboflow) — `yolov8n`, 60 epochs บน GPU, **mAP50 0.988 / mAP50-95 0.787** (capybara 0.983, dino 0.990, elephant 0.990) ไฟล์โมเดลอยู่ที่ `models/best.pt` (commit เข้า git ไว้แล้ว ไม่ใช่แค่ในเครื่อง) ทดสอบเร็วๆ โดยไม่ต้องมีตุ๊กตาจริงด้วย `venv\Scripts\python.exe tools\test_on_webcam.py` (เว็บแคมสด) หรือ `tools\test_on_video.py` (จากไฟล์วิดีโอ)
+**สถานะ YOLO:** เทรนรอบ 2 แล้ว (10 ก.ค.) จากรูปที่ถ่าย+label เอง **1,369 รูป** — รอบนี้เพิ่มท่าวางแปลกๆ (หงายท้อง/หันหัว-ตูดเข้ากล้อง/ถูกถือ/เฟรมเบลอ) เพื่อรับมือกรรมการวางเป้าท่าไหนก็ได้วันแข่ง โดยใช้โมเดลรอบแรก label รูปใหม่ให้อัตโนมัติ (`tools/auto_label.py`) แล้วรีวิวใน Roboflow — `yolov8n`, 60 epochs บน GPU ได้ **mAP50 0.968 (valid) / 0.937 (test)** (คะแนนต่ำกว่ารอบแรกเพราะชุดทดสอบโหดขึ้นมาก ไม่ใช่โมเดลแย่ลง — precision บน test 0.971 = กรอบผีลดลงชัดเจน) ไฟล์โมเดลอยู่ที่ `models/best.pt` (commit เข้า git ไว้แล้ว ไม่ใช่แค่ในเครื่อง) ทดสอบเร็วๆ โดยไม่ต้องมีตุ๊กตาจริงด้วย `venv\Scripts\python.exe tools\test_on_webcam.py` (เว็บแคมสด) หรือ `tools\test_on_video.py` (จากไฟล์วิดีโอ)
 
 ⚠️ split train/valid/test แบ่งแบบ**จัดกลุ่มตามคลิปต้นทาง** (`tools/resplit_dataset.py`) — ไม่ใช่สุ่มทีละรูปแบบที่ Roboflow ทำให้อัตโนมัติ เพราะรูปที่ตัดมาจากวิดีโอเดียวกันจะเกือบเหมือนกันทุกพิกเซล ถ้าสุ่มแบบรายรูปจะมีเฟรมพี่น้องรั่วข้าม split ทำให้ mAP สูงเกินจริง (data leakage) ถ้า generate version ใหม่จาก Roboflow อีกครั้งต้องรัน `resplit_dataset.py` ซ้ำก่อนเทรนเสมอ
 
@@ -176,9 +176,10 @@ venv\Scripts\python.exe tools\smoke_test.py      # ทดสอบอัตโ�
 - [x] ชุดบทเรียน vision สำหรับฝึกก่อนได้อุปกรณ์
 - [x] Simulator + smoke test: พิสูจน์ loop เล็ง→วัดระยะ→ยิง ครบวงจร (9/9 ใน sim)
 - [x] วิเคราะห์ ballistics → เลือกมุมเงย 30–35° (หลีกเลี่ยงช่วง non-monotonic)
-- [x] เก็บ dataset (770 รูป, label เอง) + เทรน YOLOv8n บน split ที่จัดกลุ่มตามคลิปต้นทาง (กัน leakage) — mAP50 0.988 / mAP50-95 0.787, `DETECTOR = "yolo"` เป็นค่าเริ่มต้นแล้ว, `models/best.pt` commit เข้า git แล้ว
-- [ ] ประกอบฮาร์ดแวร์ + พิมพ์ชิ้นส่วน 3D
-- [ ] Calibrate: focal length, ตาราง PWM↔ระยะ, จูน servo
+- [x] เก็บ dataset (1,369 รูป, label เอง — รอบ 2 เพิ่มท่าวางแปลก/เฟรมเบลอ ใช้ `tools/auto_label.py` ให้โมเดลเก่าช่วยตีกรอบ) + เทรน YOLOv8n บน split ที่จัดกลุ่มตามคลิปต้นทาง (กัน leakage) — mAP50 0.968 valid / 0.937 test, `DETECTOR = "yolo"` เป็นค่าเริ่มต้นแล้ว, `models/best.pt` commit เข้า git แล้ว
+- [x] Calibrate ระยะจากขนาดในภาพ: `FOCAL_PX` + ขนาดผลจริงรายตัว (`tools/fit_focal.py` จากรูปชุด `Distance/`) ใช้ √(กว้าง·สูง) ทนการหมุน/ท่าวาง — ยืนยันสดผ่าน Camo แล้ว ท่าปกติเพี้ยน ≤~10% (แผนสำรอง+ทางเลือกอยู่ใน `docs/วิธีวัดระยะ-ranging.md`)
+- [ ] ประกอบฮาร์ดแวร์ + พิมพ์ชิ้นส่วน 3D (มอเตอร์ล้อยิงเปลี่ยนเป็น RS-180 — TT motor แรงไม่พอ ~20 เท่า)
+- [ ] Calibrate รอบฮาร์ดแวร์จริง: ตาราง PWM↔ระยะ, จูน servo, เก็บแคมเปญระยะด้วยโมเดลใหม่ (`tools/collect_ranging_data.py`)
 - [ ] ทดสอบรวมระบบ + เก็บสถิติความแม่น (เป้า >5/10 แบบมี margin)
 - [ ] นำเสนอ 30 ก.ค. 2026
 

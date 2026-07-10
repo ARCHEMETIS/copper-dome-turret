@@ -58,7 +58,7 @@ venv\Scripts\python.exe src\main.py --sim
 
 ### STEP 2.5 — ทดสอบ YOLO กับเว็บแคมจริง (ยังไม่ต้องมี Arduino)
 
-โมเดล YOLO เทรนเสร็จแล้ว (`models/best.pt`, mAP50 0.971) ลองดูว่ามันแยกตุ๊กตาได้จริงไหมผ่านเว็บแคม โดยยังไม่ต้องต่อ Arduino เลย:
+โมเดล YOLO เทรนเสร็จแล้ว (`models/best.pt` เทรนรอบ 2, mAP50 0.968 — รู้จักท่าวางแปลกๆ ด้วย) ลองดูว่ามันแยกตุ๊กตาได้จริงไหมผ่านเว็บแคม โดยยังไม่ต้องต่อ Arduino เลย:
 
 ```powershell
 venv\Scripts\python.exe tools\test_on_webcam.py

@@ -22,9 +22,12 @@ from pathlib import Path
 DATASET = Path(__file__).resolve().parent.parent / "dataset"
 SPLITS = ["train", "valid", "test"]
 RATIOS = {"train": 0.70, "valid": 0.20, "test": 0.10}
-SEED = 0
+SEED = 57  # เลือกจากการไล่ seed 0-99 เอาอันที่คลาสกระจายใน valid/test สมดุลสุด
+           # (seed 0 เผอิญทำให้คลิป dino ใหญ่ๆ ไปกอง train หมด — valid เหลือ dino แค่ 34 กรอบ)
 
-GROUP_RE = re.compile(r"^(.*?)(?:_frame_\d+)?(?:_jpe?g)?\.rf\.[A-Za-z0-9]+\.jpe?g$", re.IGNORECASE)
+# เลขเฟรมมี 2 แบบตามยุค: "_frame_012" (ชุดเก่า) และ "-0012" (ชุดใหม่ Roboflow
+# สไลซ์วิดีโอ เช่น IMG_1702_MOV-0000_jpg.rf.xxx.jpg) — ตัดทั้งคู่ก่อนจับกลุ่ม
+GROUP_RE = re.compile(r"^(.*?)(?:_frame_\d+)?(?:-\d+)?(?:_(?:jpe?g|png))?\.rf\.[A-Za-z0-9]+\.jpe?g$", re.IGNORECASE)
 # หมายเหตุ: ห้ามเพิ่ม "*.JPG"/"*.JPEG" — Windows filesystem ไม่แยกตัวพิมพ์เล็ก/ใหญ่
 # ของนามสกุลไฟล์อยู่แล้ว ใส่ซ้ำจะทำให้ glob เจอไฟล์เดิมซ้ำ 2 รอบ (นับรูปเบิ้ล)
 IMAGE_GLOBS = ("*.jpg", "*.jpeg")
@@ -59,7 +62,9 @@ def main():
     # 2) สุ่มลำดับกลุ่ม (seed ตายตัว = ทำซ้ำได้ผลเดิมทุกครั้ง) แล้วไล่ยัดใส่ split
     #    ทีละกลุ่มจนกว่าโควต้ารูปของ split นั้นจะเกือบเต็มตามสัดส่วนที่ตั้งไว้
     rng = random.Random(SEED)
-    group_items = list(groups.items())
+    # ต้อง sort ก่อน shuffle — ไม่งั้นลำดับตั้งต้นขึ้นกับลำดับไฟล์ในโฟลเดอร์
+    # ณ ขณะรัน (ซึ่งเปลี่ยนทุกครั้งที่ resplit) แล้ว seed เดิมจะให้ผลไม่เดิม
+    group_items = sorted(groups.items())
     rng.shuffle(group_items)
 
     quota = {s: RATIOS[s] * total_images for s in SPLITS}
