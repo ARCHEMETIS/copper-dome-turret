@@ -52,11 +52,13 @@ def best_box(model, frame):
 def record_point(cap, model, dist_cm, pose):
     """อ่าน RECORD_FRAMES เฟรม เก็บ median ขนาดกรอบ แล้วต่อท้าย CSV 1 แถว"""
     ws, hs, confs, label = [], [], [], None
-    t0 = time.time()
+    frame_w = None               # ความกว้างเฟรม "จริง" ที่วัด px มา — ห้ามใช้ค่า
+    t0 = time.time()             # จาก config เพราะกล้องอาจส่งขนาดอื่นมาโดยไม่บอก
     while len(ws) < RECORD_FRAMES and time.time() - t0 < 10:
         ok, frame = cap.read()
         if not ok:
             continue
+        frame_w = frame.shape[1]
         box = best_box(model, frame)
         if box is None:
             continue
@@ -81,7 +83,7 @@ def record_point(cap, model, dist_cm, pose):
     row = [datetime.now().strftime("%Y-%m-%d %H:%M:%S"), label, pose, dist_cm,
            round(w, 1), round(h, 1), round((w * h) ** 0.5, 1),
            round(statistics.median(confs), 3), len(ws),
-           config.FRAME_WIDTH, Path(config.YOLO_MODEL_PATH).name]
+           frame_w, Path(config.YOLO_MODEL_PATH).name]
 
     new_file = not CSV_PATH.exists()
     with open(CSV_PATH, "a", newline="", encoding="utf-8-sig") as f:  # sig = เปิดใน Excel ไม่เพี้ยน

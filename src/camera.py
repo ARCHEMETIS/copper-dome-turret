@@ -40,7 +40,27 @@ def _try_open(index: int, backend: int, name: str) -> cv2.VideoCapture | None:
             if (w, h) != (config.FRAME_WIDTH, config.FRAME_HEIGHT):
                 cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.FRAME_WIDTH)
                 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.FRAME_HEIGHT)
-            print(f"[camera] เปิดกล้อง index {index} สำเร็จ ({name}, {w}x{h})")
+                # เฟรมที่ค้างใน buffer อาจยังเป็นขนาดเก่า — อ่านทิ้งสัก 2-3 เฟรม
+                for _ in range(3):
+                    ok, f2 = cap.read()
+                    if ok and f2 is not None:
+                        frame = f2
+
+            # เช็คขนาดจาก "เฟรมจริง" ไม่ใช่ค่า property (กล้องเสมือนบางตัว
+            # ตอบรับคำสั่ง set แต่ส่งภาพขนาดเดิมมาเฉยๆ) — ถ้าไม่ตรง ห้ามใช้ต่อ:
+            # FOCAL_PX คาลิเบรตไว้ที่ FRAME_WIDTH ระยะทุกค่าจะเพี้ยนตามสัดส่วน
+            # แบบเงียบๆ (เช่นได้ 1920 มา = อ่านระยะสั้นลง 1.5 เท่า ยิงตกทุกนัด)
+            fh, fw = frame.shape[:2]
+            if fw != config.FRAME_WIDTH:
+                cap.release()
+                raise RuntimeError(
+                    f"กล้องส่งภาพ {fw}x{fh} แต่ระบบคาลิเบรตไว้ที่ "
+                    f"{config.FRAME_WIDTH}x{config.FRAME_HEIGHT} — ใช้ต่อไม่ได้ "
+                    f"เพราะ FOCAL_PX ผูกกับความกว้างนี้ (ระยะจะเพี้ยนทั้งระบบ) → "
+                    f"ตั้ง resolution ใน Camo Studio ให้ตรง หรือแก้ FRAME_WIDTH "
+                    f"พร้อมสเกล FOCAL_PX ใน config.py ให้สอดคล้องกัน"
+                )
+            print(f"[camera] เปิดกล้อง index {index} สำเร็จ ({name}, {fw}x{fh})")
             return cap
         time.sleep(0.08)
 
