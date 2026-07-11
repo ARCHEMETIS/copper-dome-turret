@@ -15,8 +15,9 @@ def distance_mm(detection) -> float:
 
     ตัวแก้ตามท่า: √(w·h) ก็ยังเพี้ยนตามท่า (หัวจ่อกล้อง = เงาเล็ก = อ่านไกลเกิน,
     ไดโนหันข้าง = เงาใหญ่ = อ่านใกล้เกิน) แต่ "ท่า" เดาได้จากรูปทรงกรอบ w/h
-    → คูณ factor ตามแถบ w/h ใน ASPECT_CORRECTION (fit จาก ranging_log.csv
-    42 จุด: หลังแก้ ทุกจุดเข้า ±10% จากเดิมพลาดถึง ±21%)
+    → คูณ factor จากการ interp จุด knot ใน ASPECT_CORRECTION (fit ด้วย
+    tools/fit_aspect.py: แย่สุด ±21.9% → ±10.6% — interp ต่อเนื่อง กรอบสั่น
+    เล็กน้อยระยะขยับนิดเดียว ไม่กระโดดเป็นขั้นแบบ lookup ตามแถบ)
     ต้อง calibrate FOCAL_PX + real_size_mm ก่อน (tools/fit_focal.py)"""
     if config.FOCAL_PX is None:
         raise RuntimeError("ยังไม่ได้ calibrate FOCAL_PX — รัน tools/fit_focal.py ก่อน")
@@ -24,10 +25,11 @@ def distance_mm(detection) -> float:
     size_px = (detection.w_px * detection.h_px) ** 0.5
     dist = config.FOCAL_PX * real / size_px
 
-    aspect = detection.w_px / detection.h_px
-    for lo, hi, factor in config.ASPECT_CORRECTION.get(detection.label, ()):
-        if lo <= aspect < hi:
-            return dist * factor
+    knots = config.ASPECT_CORRECTION.get(detection.label)
+    if knots:
+        aspect = detection.w_px / detection.h_px
+        dist *= float(np.interp(aspect, [a for a, _ in knots],
+                                [f for _, f in knots]))
     return dist
 
 

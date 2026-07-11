@@ -74,11 +74,11 @@ def ranging_leg(failures):
         print("(ข้ามขา ranging — ไม่มี Distance/ranging_log.csv ในเครื่องนี้)")
         return
 
-    model_name = Path(config.YOLO_MODEL_PATH).name
+    tag = config.yolo_model_tag()   # ชื่อ+hash — ชื่อไฟล์เฉยๆ ซ้ำกันทุกรอบเทรน
     checked = worst = 0
     with open(csv_path, encoding="utf-8-sig") as f:
         for row in csv.DictReader(f):
-            if row.get("โมเดล") != model_name:
+            if row.get("โมเดล") != tag:
                 continue  # ข้อมูลของโมเดลอื่น เทียบกับ config ปัจจุบันไม่ได้
             det = Detection(row["ตัว"], 0, 0,
                             float(row["px_w"]), float(row["px_h"]), 1.0)
@@ -93,7 +93,8 @@ def ranging_leg(failures):
     if checked:
         print(f"ranging | เช็ค {checked} จุดจาก CSV: เพี้ยนแย่สุด {worst:.1f}%")
     else:
-        print(f"(ข้ามขา ranging — ใน CSV ไม่มีแถวของโมเดล {model_name})")
+        print(f"(ข้ามขา ranging — ใน CSV ไม่มีแถวของโมเดล {tag} "
+              "→ เก็บใหม่ด้วย collect_ranging_data.py แล้ว fit_aspect.py)")
 
 
 def main():

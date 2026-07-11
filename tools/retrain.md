@@ -21,7 +21,11 @@ venv\Scripts\yolo.exe detect train model=yolov8n.pt data=dataset/data.yaml epoch
 4. ลองของจริง: `venv\Scripts\python.exe tools\test_on_webcam.py` — เอาเสื้อขาว/เทามาโบกหน้ากล้องดูว่าผีหายไหม
 5. ผีหายแล้ว → ลด `YOLO_CONF` ใน `src/config.py` กลับ (0.65 → 0.5)
 6. ⚠ ranging: กรอบโมเดลใหม่อาจต่างจากเดิม → เก็บข้อมูลซ้ำด้วย
-   `tools/collect_ranging_data.py` แล้ว fit `real_size_mm` ใหม่
+   `tools/collect_ranging_data.py` แล้ว fit ใหม่ **ทั้งสองอย่าง**:
+   `real_size_mm` และ `ASPECT_CORRECTION` (รัน `tools/fit_aspect.py`
+   แล้ววาง block ที่มันพิมพ์ลง `src/config.py`)
+   — แถวเก่าใน ranging_log.csv ไม่ต้องลบ: ทุกแถวแท็กด้วยชื่อ+hash ของโมเดล
+   (`config.yolo_model_tag()`) เครื่องมือทุกตัวกรองเฉพาะแถวของโมเดลปัจจุบันเอง
 
 ## อยากแม่นขึ้นอีก (ถ้ามีเวลา)
 

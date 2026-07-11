@@ -85,12 +85,12 @@ def load_collected():
     """อ่าน CSV เดิม (ถ้ามี) → dict: ระยะ_cm -> set ของ (ตัว, ท่า) ที่เก็บแล้ว
     ไว้โชว์สรุปบนจอ — นับเฉพาะแถวของโมเดลปัจจุบัน (ข้อมูลข้ามโมเดลใช้ไม่ได้)"""
     collected = defaultdict(set)
-    model_name = Path(config.YOLO_MODEL_PATH).name
+    tag = config.yolo_model_tag()   # ชื่อ+hash — ชื่อไฟล์เฉยๆ ซ้ำกันทุกรอบเทรน
     if not CSV_PATH.exists():
         return collected
     with open(CSV_PATH, encoding="utf-8-sig") as f:
         for row in csv.DictReader(f):
-            if row.get("โมเดล") != model_name:
+            if row.get("โมเดล") != tag:
                 continue
             try:
                 dist = float(row["ระยะจริง_cm"])
@@ -144,7 +144,7 @@ def record_point(cap, model, dist_cm, pose):
     row = [datetime.now().strftime("%Y-%m-%d %H:%M:%S"), label, pose, dist_cm,
            round(w, 1), round(h, 1), round((w * h) ** 0.5, 1),
            round(statistics.median(confs), 3), len(ws),
-           frame_w, Path(config.YOLO_MODEL_PATH).name]
+           frame_w, config.yolo_model_tag()]
 
     new_file = not CSV_PATH.exists()
     with open(CSV_PATH, "a", newline="", encoding="utf-8-sig") as f:  # sig = เปิดใน Excel ไม่เพี้ยน
