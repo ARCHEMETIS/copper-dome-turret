@@ -47,7 +47,11 @@ def yolo_leg(failures):
 
         img_path = next(p for p in (test_dir / "images").glob(label_path.stem + ".*"))
         frame = cv2.imread(str(img_path))
-        d = det.detect(frame, true_label)
+        # ประตู persistence ต้องเห็นเป้าสะสมหลายเฟรมก่อนปล่อย — รูปนิ่ง = เป้า
+        # อยู่ทนอยู่แล้ว จึงป้อนรูปเดิมซ้ำเท่าเกณฑ์ (เหมือนกล้องจ้องเป้านิ่งๆ)
+        for _ in range(config.GATE_PERSIST_FRAMES):
+            d = det.detect(frame, true_label)
+        det._persist.clear()   # กันเป้าถัดไปได้อานิสงส์ตัวนับของรูปก่อน
         checked += 1
         if d is None:
             failures.append(f"YOLO: ไม่เจอ {true_label} ใน {img_path.name}")

@@ -130,8 +130,18 @@ def yolo_model_tag() -> str:
     ข้ามโมเดลปนกันไม่ได้ (นิสัยการตีกรอบของแต่ละโมเดลไม่เหมือนกัน)"""
     p = Path(YOLO_MODEL_PATH)
     return f"{p.name}@{hashlib.sha1(p.read_bytes()).hexdigest()[:8]}"
-YOLO_CONF = 0.5
+YOLO_CONF = 0.5             # ⚠ อย่าขึ้นทั้งระบบเพื่อฆ่า ghost — ตุ๊กตาท่ายาก conf ต่ำจริง
+                            # (test set: capybara p5=0.26, dino p5=0.53) ให้ประตูข้างล่างจัดการแทน
 HSV_MIN_AREA_PX = 800       # กรอง noise เล็กๆ ทิ้ง
+
+# ---------- ประตูกัน ghost (เฉพาะ YoloDetector — HSV/sim ไม่เกี่ยว) ----------
+# หลักฐาน+เหตุผลอยู่ docs/vision-baseline.md ข้อ 4 และ wayfinder #10:
+# ghost บนคลิป negative อยู่ทนสุด 233ms แต่ตุ๊กตาจริงเจอ 96% ของเฟรม
+GATE_PERSIST_FRAMES = 3         # เห็นสะสมกี่เฟรม (นับ +1/-1) ก่อนยอมปล่อย detection
+GATE_DIST_RANGE_MM = (500, 4500)  # ระยะที่เป็นไปได้ → ขอบเขตขนาดกรอบผ่านสูตร ranging
+                                  # (ขอบไกล 4.5m: เคยตั้ง 3.5m แล้วตาบอดใส่ capybara
+                                  # ตัวจริงใน VideoForTest ที่ ~4m — สนามจริง 1.5-2.4m
+                                  # แต่ตอนซ้อม/กวาดหาเป้า เจอไกลกว่านั้นได้จริง)
 
 # ---------- Visual servoing (การเล็ง) ----------
 AIM_DEADBAND_PX = 15        # เป้าห่างกลางภาพไม่เกินนี้ = ถือว่าเล็งตรงแล้ว
