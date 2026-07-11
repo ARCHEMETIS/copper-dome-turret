@@ -8,6 +8,7 @@ dataset/
 models/*.pt
 !models/best.pt
 yolov8n.pt
+yolov8s.pt
 yolo26n.pt
 runs/
 snap_*.jpg
