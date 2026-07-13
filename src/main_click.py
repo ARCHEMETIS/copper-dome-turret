@@ -72,12 +72,15 @@ class TacticalUI:
             self.mode = "LIVE"
             self.can_fire = True
 
-        self.busy = False            # กำลังเล็ง/ยิง — thread ยิงเป็นคนอ่านกล้อง
+        self.busy = False            # กำลังเล็ง/ยิง — thread ยิงเป็นเจ้าของกล้อง/ป้อมแต่ผู้เดียว
         self.locked = None           # label เป้าที่ล็อกไว้ (None = ยังไม่เลือก)
         self.mouse = (0, 0)
         self.dets = []               # detection ล่าสุด (worker เขียน, main thread อ่าน/วาด)
         self._latest = None          # เฟรมล่าสุดที่ส่งให้ worker ตรวจ
+        self._last_shown = None      # เฟรมสดล่าสุดที่แสดง — ใช้โชว์คั่นตอน busy (ห้ามอ่านกล้องซ้ำ)
         self._alive = False          # ธง life ของ worker thread
+        self._abort = False          # สั่ง aim_at เลิกกลางคัน (ตอนปิดโปรแกรม)
+        self._fire_thread = None     # handle ของ thread ยิง — ไว้ join ตอนปิด
         self.status = "READY  //  CLICK A TARGET, PRESS F TO FIRE"
         self.status_color = GREEN
 
@@ -131,9 +134,11 @@ class TacticalUI:
         if self.locked is None:
             self._set_status("NO TARGET SELECTED  //  CLICK A TARGET FIRST", RED)
             return
+        self._shared_frame = None    # กันโชว์เฟรมค้างจากนัดก่อนตอนเริ่ม busy
         self.busy = True
-        threading.Thread(target=self._fire_sequence, args=(self.locked,),
-                         daemon=True).start()
+        self._fire_thread = threading.Thread(target=self._fire_sequence,
+                                             args=(self.locked,), daemon=True)
+        self._fire_thread.start()
 
     def _fire_sequence(self, target):
         try:
@@ -144,7 +149,8 @@ class TacticalUI:
                     self._shared_frame = frame
                     self._shared_dets = [det] if det is not None else []
 
-            det = aiming.aim_at(self.turret, self.cap, self.detector, target, on_frame)
+            det = aiming.aim_at(self.turret, self.cap, self.detector, target,
+                                on_frame, should_abort=lambda: self._abort)
             if det is None:
                 self._set_status("NO TARGET / AIM FAILED  //  TRY AGAIN", RED)
                 return
@@ -176,7 +182,6 @@ class TacticalUI:
         cv2.circle(img, (cx, cy), 60, GREEN_DIM, 1)       # วงบอกศูนย์
         # ขีดบอกสเกลบนวงเล็ง
         for a in (0, 90, 180, 270):
-            import math
             dx, dy = int(60 * math.cos(math.radians(a))), int(60 * math.sin(math.radians(a)))
             cv2.line(img, (cx + dx, cy + dy),
                      (cx + int(dx * 1.12), cy + int(dy * 1.12)), GREEN_DIM, 1)
@@ -276,18 +281,22 @@ class TacticalUI:
 
     # ---------- thread ตรวจจับ (แยกจากการแสดงผล) ----------
     def _detect_worker(self):
-        """รัน detect_all วนบนเฟรมล่าสุดตลอด แล้วเก็บผลไว้ที่ self.dets
-        แยกจากลูปแสดงผล → วิดีโอเล่นเต็มเฟรมเรตไม่ต้องรอ YOLO (~40ms/เฟรม)
-        ตอน busy (aim_at อ่านกล้องเอง) พักไว้ กันแย่งเฟรมกัน"""
+        """รัน detect_all บนเฟรมล่าสุดแล้วเก็บผลไว้ที่ self.dets
+        แยกจากลูปแสดงผล → วิดีโอเล่นเต็มเฟรมเรตไม่ต้องรอ YOLO (~27ms/เฟรม)
+        ตอน busy (thread ยิงเป็นเจ้าของกล้อง) พักไว้ กันแย่งเฟรมกัน
+        ตรวจเฉพาะเฟรม "ใหม่" (เทียบด้วย identity) — ไม่งั้นวน detect เฟรมเดิม
+        ซ้ำรัวๆ กิน CPU เปล่า (เห็นชัดในโหมด sim ที่ HSV เร็วมาก)"""
+        last = None
         while self._alive:
             if self.busy:
                 time.sleep(0.02)
                 continue
             with self._lock:
                 frame = self._latest
-            if frame is None:
+            if frame is None or frame is last:
                 time.sleep(0.005)
                 continue
+            last = frame
             try:
                 self.dets = self.detector.detect_all(frame)
             except Exception:
@@ -304,21 +313,26 @@ class TacticalUI:
         try:
             while True:
                 if self.busy:
+                    # ตอน busy thread ยิงเป็นเจ้าของกล้องแต่ผู้เดียว — main "ห้าม" อ่าน
+                    # กล้อง (VideoCapture ไม่ thread-safe) โชว์เฟรมที่ thread ยิงส่งมา
+                    # ผ่าน on_frame ถ้ายังไม่มีก็โชว์เฟรมสดล่าสุดก่อนเริ่มยิงคั่นไว้
                     with self._lock:
                         frame = None if self._shared_frame is None else self._shared_frame.copy()
                         dets = list(self._shared_dets)
                     if frame is None:
-                        ok, frame = self.cap.read()
-                        if not ok:
-                            continue
+                        frame = self._last_shown
                 else:
                     ok, frame = self.cap.read()
                     if not ok:
                         continue
+                    self._last_shown = frame
                     with self._lock:
                         self._latest = frame          # ส่งเฟรมล่าสุดให้ worker ตรวจ
                     dets = self.dets                  # กล่องล่าสุดจาก worker (อาจช้ากว่าเฟรมนิดหน่อย)
 
+                if frame is None:
+                    cv2.waitKey(1)                    # ยังไม่มีเฟรมให้โชว์ (busy ก่อนได้เฟรมแรก)
+                    continue
                 cv2.imshow(win, self.render(frame, dets))
 
                 # นับ FPS
@@ -335,7 +349,13 @@ class TacticalUI:
                 if cv2.getWindowProperty(win, cv2.WND_PROP_VISIBLE) < 1:
                     break
         finally:
+            # สั่งทุก thread หยุด แล้ว "รอ thread ยิงจบก่อน" ค่อยปิดกล้อง/ป้อม —
+            # ไม่งั้น close()/release() จะไปชนกับ aim_at/fire ที่ยังเขียน serial/อ่าน
+            # กล้องอยู่ (abort ทำให้ aim_at เด้งออกเร็ว ไม่ต้องรอจน AIM_TIMEOUT_S)
+            self._abort = True
             self._alive = False
+            if self._fire_thread is not None:
+                self._fire_thread.join(timeout=4.0)   # ครอบ 1 จังหวะยิง (spinup+feed ~2.3s)
             worker.join(timeout=1.0)
             try:
                 self.turret.close()

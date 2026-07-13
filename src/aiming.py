@@ -8,16 +8,20 @@ import time
 import config
 
 
-def aim_at(turret, cap, detector, target: str, on_frame=None):
+def aim_at(turret, cap, detector, target: str, on_frame=None, should_abort=None):
     """เล็งเป้าจนอยู่กลางภาพ
 
     on_frame: callback(frame, detection|None) เอาไว้ให้ UI วาดภาพระหว่างเล็ง (ใส่หรือไม่ก็ได้)
-    คืนค่า Detection ล่าสุด (เล็งสำเร็จ) หรือ None (หาไม่เจอ/หมดเวลา)
+    should_abort: callable() -> bool เช็คทุกรอบลูป ถ้าคืน True เลิกเล็งทันที
+                  (เช่น ตอนปิดโปรแกรมกลางคัน — จะได้ไม่ต้องรอจนหมด AIM_TIMEOUT_S)
+    คืนค่า Detection ล่าสุด (เล็งสำเร็จ) หรือ None (หาไม่เจอ/หมดเวลา/ถูกยกเลิก)
     """
     deadline = time.time() + config.AIM_TIMEOUT_S
     confirmed = 0
 
     while time.time() < deadline:
+        if should_abort is not None and should_abort():
+            return None
         ok, frame = cap.read()
         if not ok:
             continue
