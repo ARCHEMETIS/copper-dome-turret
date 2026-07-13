@@ -12,6 +12,10 @@ import numpy as np
 import config
 
 
+# แมป yolo_class (เลข class ตอนเทรน) กลับเป็น target key — ใช้ตอน detect_all
+_YOLO_CLASS_TO_TARGET = {t["yolo_class"]: key for key, t in config.TARGETS.items()}
+
+
 @dataclass
 class Detection:
     label: str        # "dino" / "capybara" / "elephant"
@@ -43,6 +47,16 @@ class HsvDetector:
         x, y, w, h = cv2.boundingRect(biggest)
         return Detection(target, x + w / 2, y + h / 2, w, h, conf=1.0)
 
+    def detect_all(self, frame_bgr) -> list[Detection]:
+        """หาทุกเป้าที่เห็นในเฟรม (1 ตัวต่อชนิด) — ให้ UI คลิกเลือกได้
+        เป้า 3 ตัวเป็นคนละสี/คนละคลาส จึงวนหาแยกทีละชนิดพอ"""
+        out = []
+        for target in config.TARGETS:
+            det = self.detect(frame_bgr, target)
+            if det is not None:
+                out.append(det)
+        return out
+
 
 class YoloDetector:
     """ตรวจจับด้วย YOLO + ประตูกัน ghost 2 ชั้น (ดู docs/vision-baseline.md)
@@ -68,6 +82,28 @@ class YoloDetector:
         real = config.TARGETS[target]["real_size_mm"]
         near, far = config.GATE_DIST_RANGE_MM
         return config.FOCAL_PX * real / far <= size <= config.FOCAL_PX * real / near
+
+    def detect_all(self, frame_bgr) -> list[Detection]:
+        """หาทุกเป้าในเฟรมทีเดียว (predict รอบเดียว) — ให้ UI คลิกเลือกได้
+
+        ต่างจาก detect(): ไม่กรองด้วยประตูเวลา (temporal gate) เพราะประตูนั้น
+        นับสะสมต่อ "ชนิดเป้าเดียว" ไว้ตัดสินใจตอนเล็ง/ยิง ส่วนจอมอนิเตอร์แค่
+        โชว์กรอบ — ผีวูบ 1 เฟรมยอมรับได้ คนดูเลือกตัวจริงเองอยู่แล้ว และตอน
+        กดยิงจริง aim_at() เรียก detect() ที่มีประตูครบกันไว้อีกชั้น
+        ยังกรองด้วยชั้นขนาด (size sanity) เพื่อตัดผีกรอบใหญ่/เล็กผิดธรรมชาติ"""
+        results = self.model.predict(frame_bgr, conf=config.YOLO_CONF, verbose=False)
+        out = []
+        for box in results[0].boxes:
+            target = _YOLO_CLASS_TO_TARGET.get(int(box.cls))
+            if target is None:
+                continue
+            x1, y1, x2, y2 = box.xyxy[0].tolist()
+            w, h = x2 - x1, y2 - y1
+            if not self._size_plausible(target, w, h, frame_bgr.shape[1]):
+                continue
+            out.append(Detection(target, (x1 + x2) / 2, (y1 + y2) / 2,
+                                  w, h, float(box.conf)))
+        return out
 
     def detect(self, frame_bgr, target: str) -> Detection | None:
         want = config.TARGETS[target]["yolo_class"]
