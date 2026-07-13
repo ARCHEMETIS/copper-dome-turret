@@ -1,17 +1,18 @@
 # =============================================================
 # main_click.py — จอมอนิเตอร์ยุทธวิธี (OpenCV ล้วน) สำหรับวันแข่ง
-#   ธีมทหารสีเขียว มีเส้น/จุดเล็งกลางจอ + กรอบล็อกเป้าแบบเครื่องบินรบ
-#   คลิกที่ตัวเป้าเพื่อล็อก → กด F → ป้อมหันไปเล็ง วัดระยะ แล้วยิง
+#   ธีมทหารเขียว + เส้น/จุดเล็งกลางจอ + ระบบล็อกเป้าแบบเครื่องบินรบ
+#
+# เล็งด้วย "คลิกที่ไหนก็หันไปที่นั่น" — ไม่พึ่ง detection (วันแข่งมุมเงย + โต๊ะบัง
+# ท่อนล่างของเป้า โมเดลอาจมองไม่เห็น/กรอบเพี้ยน แต่ตาคนเห็นชัด) กรอบ detection
+# เป็นแค่ "ตัวช่วยเล็ง" สีเขียว ป้อมหันเอาพิกเซลที่คลิกมากลางจอ แล้วเป้าจะมาอยู่
+# ใต้เป้าเล็งแดงกลางจอ → เลือกระยะ → ยิง
 #
 # รันกับของจริง:  venv\Scripts\python.exe src\main_click.py
 # รันโหมดจำลอง:   venv\Scripts\python.exe src\main_click.py --sim
 #
-# ปุ่ม:  คลิกซ้าย = เลือก/ล็อกเป้า | คลิกขวา = ปลดล็อก
-#        F = ยิงเป้าที่ล็อก | Q หรือ ESC = ออก
-#
-# ทำไม OpenCV ล้วน (ไม่ใช่ Tkinter แบบ main.py): โจทย์วันจริงคือ "คลิกตัวไหน
-# ป้อมหันไปตัวนั้น" ต้อง hit-test คลิกกับกล่อง detection บนภาพโดยตรง —
-# แสดงภาพเต็มความละเอียด (ไม่ย่อ) พิกัดคลิกจึงตรงกับพิกัดเฟรม 1:1
+# ปุ่ม:  คลิกซ้าย = หันไปเล็งจุดนั้น | คลิกขวา = ยกเลิกล็อก
+#        1/2/3 = ระยะ ใกล้/กลาง/ไกล | C = คืนป้อมกลางลำ
+#        F = ยิง | Q หรือ ESC = ออก
 # =============================================================
 import math
 import sys
@@ -20,7 +21,6 @@ import time
 
 import cv2
 
-import aiming
 import config
 import detector as detector_mod
 import ranging
@@ -28,13 +28,13 @@ import ranging
 # ---------- สีธีม (BGR) ----------
 GREEN = (80, 255, 80)        # เขียว HUD หลัก
 GREEN_DIM = (40, 130, 40)    # เขียวจาง — chrome/เส้นรอง
-AMBER = (0, 200, 255)        # เหลืองอำพัน — เป้าที่ล็อก (ให้เด่นออกจากตัวอื่น)
-RED = (60, 60, 255)          # แดง — เตือน/ยิง
+AMBER = (0, 200, 255)        # เหลืองอำพัน — เตือน/โหมด TEST
+RED = (60, 60, 255)          # แดง — เป้าเล็งที่ล็อก/ยิง
 FONT = cv2.FONT_HERSHEY_DUPLEX
 
 
 class _NullTurret:
-    """ป้อมหลอกสำหรับโหมด --webcam: ดูภาพ/คลิกล็อกบนกล้องจริงได้โดยไม่ต้องต่อ
+    """ป้อมหลอกสำหรับโหมด --webcam: ดูภาพ/คลิกบนกล้องจริงได้โดยไม่ต้องต่อ
     Arduino — ทุกคำสั่งเป็น no-op (ไม่มีอะไรขยับ/ยิง)"""
     pan_angle = float(config.PAN_CENTER)
 
@@ -56,7 +56,6 @@ class TacticalUI:
             self.can_fire = True
         elif "--webcam" in sys.argv:
             # กล้องจริง + โมเดลจริง แต่ไม่ต่อ Arduino — ไว้ทดสอบ detection + HUD
-            # + คลิกล็อกบนเว็บแคม (ปุ่ม F ปิดไว้ เพราะไม่มีป้อมให้หัน/ยิง)
             import camera
             self.cap = camera.open_camera()
             self.turret = _NullTurret()
@@ -72,200 +71,161 @@ class TacticalUI:
             self.mode = "LIVE"
             self.can_fire = True
 
-        self.busy = False            # กำลังเล็ง/ยิง — thread ยิงเป็นเจ้าของกล้อง/ป้อมแต่ผู้เดียว
-        self.locked = None           # label เป้าที่ล็อกไว้ (None = ยังไม่เลือก)
+        self.busy = False            # กำลังยิง (หมุนล้อ+ดันลูก) — กันกดยิงซ้อน
+        self.armed = False           # คลิกเล็งแล้ว = พร้อมยิง (โชว์เป้าเล็งแดง)
+        self.range_key = config.RANGE_DEFAULT
         self.mouse = (0, 0)
-        self.dets = []               # detection ล่าสุด (worker เขียน, main thread อ่าน/วาด)
+        self.dets = []               # detection ล่าสุด (worker เขียน, main อ่าน/วาด)
         self._latest = None          # เฟรมล่าสุดที่ส่งให้ worker ตรวจ
-        self._last_shown = None      # เฟรมสดล่าสุดที่แสดง — ใช้โชว์คั่นตอน busy (ห้ามอ่านกล้องซ้ำ)
-        self._alive = False          # ธง life ของ worker thread
-        self._abort = False          # สั่ง aim_at เลิกกลางคัน (ตอนปิดโปรแกรม)
-        self._fire_thread = None     # handle ของ thread ยิง — ไว้ join ตอนปิด
-        self.status = "READY  //  CLICK A TARGET, PRESS F TO FIRE"
-        self.status_color = GREEN
-
-        # เฟรมที่ thread ยิงส่งกลับมาระหว่างเล็ง (main thread เป็นคน imshow เท่านั้น
-        # กัน cross-thread GUI พังบางแพลตฟอร์ม)
-        self._shared_frame = None
-        self._shared_dets = []
+        self._w = config.FRAME_WIDTH
+        self._h = config.FRAME_HEIGHT
+        self._alive = False
+        self._fire_thread = None
         self._lock = threading.Lock()
+        self.status = "CLICK A TARGET TO AIM  //  1/2/3 RANGE  //  F TO FIRE"
+        self.status_color = GREEN
 
         self._t0 = time.time()
         self._frames = 0
         self._fps = 0.0
 
-    # ---------- เมาส์ ----------
+    # ---------- เมาส์: คลิก = เล็ง ----------
     def on_mouse(self, event, x, y, flags, _):
         self.mouse = (x, y)
         if self.busy:
             return
         if event == cv2.EVENT_LBUTTONDOWN:
-            self._select(x, y)
+            self._aim_click(x)
         elif event == cv2.EVENT_RBUTTONDOWN:
-            self.locked = None
-            self._set_status("READY  //  CLICK A TARGET, PRESS F TO FIRE", GREEN)
+            self.armed = False
+            self._set_status("CLICK A TARGET TO AIM  //  1/2/3 RANGE  //  F TO FIRE", GREEN)
 
-    def _select(self, x, y):
-        """เลือกเป้าจากจุดคลิก: ตัวที่คลิกโดนกรอบ (กรอบเล็กสุดชนะถ้าซ้อน)
-        ถ้าไม่โดนกรอบไหน เลือกตัวที่ศูนย์กลางใกล้จุดคลิกสุดภายใน 90 px"""
-        inside = []
-        for d in self.dets:
-            if abs(x - d.cx) <= d.w_px / 2 and abs(y - d.cy) <= d.h_px / 2:
-                inside.append(d)
-        if inside:
-            pick = min(inside, key=lambda d: d.w_px * d.h_px)
-        else:
-            near = [d for d in self.dets
-                    if ((x - d.cx) ** 2 + (y - d.cy) ** 2) ** 0.5 <= 90]
-            if not near:
-                return
-            pick = min(near, key=lambda d: (x - d.cx) ** 2 + (y - d.cy) ** 2)
-        self.locked = pick.label
-        self._set_status(f">> MISSILE LOCK: {pick.label.upper()} <<  //  PRESS F TO FIRE",
-                         RED)
+    def _aim_click(self, x):
+        """หมุนป้อมเอาคอลัมน์พิกเซล x มากลางจอ — มุม = atan(offset / FOCAL_PX)
+        ไม่ต้องมี detection: ตาคนเห็นเป้า คลิกได้เลย แม้โมเดลมองไม่เห็น
+        คลิกซ้ำเพื่อจูนละเอียด (เป้าเข้าใกล้กลางเรื่อยๆ)"""
+        if config.FOCAL_PX:
+            offset = x - self._w / 2
+            angle = math.degrees(math.atan2(offset, config.FOCAL_PX))
+            self.turret.pan_by(config.AIM_SIGN * angle * config.CLICK_AIM_GAIN)
+        self.armed = True
+        self._announce_armed()
+
+    def _announce_armed(self):
+        dist = config.RANGE_PRESETS_MM[self.range_key]
+        self._set_status(
+            f">> LOCKED · RANGE {self.range_key.upper()} {dist / 1000:.1f}M · F TO FIRE <<",
+            RED)
 
     # ---------- ยิง ----------
+    def _duty(self):
+        dist = config.RANGE_PRESETS_MM[self.range_key]
+        return ranging.duty_for_distance(dist), dist
+
     def start_fire(self):
         if self.busy:
             return
         if not self.can_fire:
-            self._set_status("TEST MODE  //  NO TURRET — DETECTION & LOCK ONLY", AMBER)
+            self._set_status("TEST MODE  //  NO TURRET — AIM & LOCK ONLY", AMBER)
             return
-        if self.locked is None:
-            self._set_status("NO TARGET SELECTED  //  CLICK A TARGET FIRST", RED)
+        if not self.armed:
+            self._set_status("CLICK A TARGET TO AIM FIRST", RED)
             return
-        self._shared_frame = None    # กันโชว์เฟรมค้างจากนัดก่อนตอนเริ่ม busy
         self.busy = True
-        self._fire_thread = threading.Thread(target=self._fire_sequence,
-                                             args=(self.locked,), daemon=True)
+        self._fire_thread = threading.Thread(target=self._fire_sequence, daemon=True)
         self._fire_thread.start()
 
-    def _fire_sequence(self, target):
+    def _fire_sequence(self):
         try:
-            self._set_status(f"ACQUIRING: {target.upper()} ...", AMBER)
-
-            def on_frame(frame, det):
-                with self._lock:
-                    self._shared_frame = frame
-                    self._shared_dets = [det] if det is not None else []
-
-            det = aiming.aim_at(self.turret, self.cap, self.detector, target,
-                                on_frame, should_abort=lambda: self._abort)
-            if det is None:
-                self._set_status("NO TARGET / AIM FAILED  //  TRY AGAIN", RED)
-                return
-            dist = ranging.distance_mm(det)
-            duty = ranging.duty_for_distance(dist)
+            duty, dist = self._duty()
             self._set_status(
-                f"RANGE {dist / 1000:.2f} M  >  DUTY {duty:.2f}  |  FIRING", RED)
+                f"FIRING · {self.range_key.upper()} {dist / 1000:.1f}M · DUTY {duty:.2f}", RED)
             self.turret.fire(duty)
-            self._set_status(f"SHOT AWAY  //  RANGE {dist / 1000:.2f} M", GREEN)
+            self._set_status(f"SHOT AWAY · {self.range_key.upper()} {dist / 1000:.1f}M", GREEN)
         except Exception as e:
             self._set_status(f"ERROR: {e}", RED)
         finally:
             self.busy = False
 
+    def _set_range(self, key):
+        self.range_key = key
+        if self.armed:
+            self._announce_armed()
+        else:
+            dist = config.RANGE_PRESETS_MM[key]
+            self._set_status(f"RANGE SET: {key.upper()} {dist / 1000:.1f}M", GREEN)
+
     def _set_status(self, text, color=GREEN):
         self.status, self.status_color = text, color
 
     # ---------- วาด HUD ----------
-    def _draw_reticle(self, img):
-        """เส้น + จุดเล็งกลางจอ แบบ boresight เครื่องบินรบ"""
+    def _draw_reticle(self, img, armed, blink):
+        """เป้าเล็งกลางจอ — ปกติเขียว (boresight), ตอน armed เป็นล็อกมิสไซล์แดง
+        (เป้าที่คลิกถูกหันมาอยู่ตรงนี้ = จุดที่ลูกจะไป)"""
         h, w = img.shape[:2]
         cx, cy = w // 2, h // 2
-        gap, arm = 16, 46
-        cv2.line(img, (cx - arm, cy), (cx - gap, cy), GREEN, 1)
-        cv2.line(img, (cx + gap, cy), (cx + arm, cy), GREEN, 1)
-        cv2.line(img, (cx, cy - arm), (cx, cy - gap), GREEN, 1)
-        cv2.line(img, (cx, cy + gap), (cx, cy + arm), GREEN, 1)
-        cv2.circle(img, (cx, cy), 3, GREEN, -1)           # จุดกลาง
-        cv2.circle(img, (cx, cy), 60, GREEN_DIM, 1)       # วงบอกศูนย์
-        # ขีดบอกสเกลบนวงเล็ง
-        for a in (0, 90, 180, 270):
-            dx, dy = int(60 * math.cos(math.radians(a))), int(60 * math.sin(math.radians(a)))
-            cv2.line(img, (cx + dx, cy + dy),
-                     (cx + int(dx * 1.12), cy + int(dy * 1.12)), GREEN_DIM, 1)
+        if not armed:
+            gap, arm = 16, 46
+            cv2.line(img, (cx - arm, cy), (cx - gap, cy), GREEN, 1)
+            cv2.line(img, (cx + gap, cy), (cx + arm, cy), GREEN, 1)
+            cv2.line(img, (cx, cy - arm), (cx, cy - gap), GREEN, 1)
+            cv2.line(img, (cx, cy + gap), (cx, cy + arm), GREEN, 1)
+            cv2.circle(img, (cx, cy), 3, GREEN, -1)
+            cv2.circle(img, (cx, cy), 60, GREEN_DIM, 1)
+            return
+        # armed = ล็อกมิสไซล์แดง
+        phase = time.time() * 7
+        pulse = int(6 + 9 * abs(math.sin(phase)))
+        for corner in ((0, 0), (w, 0), (0, h), (w, h)):     # เส้นวิ่งเข้าจาก 4 มุมจอ
+            cv2.line(img, corner, (cx, cy), (40, 40, 130), 1, cv2.LINE_AA)
+        for r, th in ((34, 2), (34 + pulse, 1)):            # กรอบเหลี่ยมเต้น
+            cv2.rectangle(img, (cx - r, cy - r), (cx + r, cy + r), RED, th)
+        cv2.circle(img, (cx, cy), 14 + pulse, RED, 1, cv2.LINE_AA)
+        cv2.drawMarker(img, (cx, cy), RED, cv2.MARKER_DIAMOND, 18, 2)
+        cv2.drawMarker(img, (cx, cy), RED, cv2.MARKER_CROSS, 40, 1)
+        if blink:
+            txt = "v LOCK v"
+            (tw, _), _ = cv2.getTextSize(txt, FONT, 0.6, 2)
+            cv2.putText(img, txt, (cx - tw // 2, cy - 44), FONT, 0.6, RED, 2, cv2.LINE_AA)
 
-    def _draw_brackets(self, img, d, color, thick, gap):
-        """กรอบมุม (corner brackets) รอบเป้า — สไตล์ระบบล็อกเป้า"""
+    def _draw_hint(self, img, d):
+        """กรอบ detection เป็น "ตัวช่วยเล็ง" สีเขียว — บอกว่าโมเดลเห็นอะไร
+        แต่ไม่ใช่ตัวตัดสินการเล็ง (คนคลิกเอง)"""
         x1, y1 = int(d.cx - d.w_px / 2), int(d.cy - d.h_px / 2)
         x2, y2 = int(d.cx + d.w_px / 2), int(d.cy + d.h_px / 2)
-        L = max(12, int(min(d.w_px, d.h_px) * 0.28))      # ความยาวขามุม
+        L = max(12, int(min(d.w_px, d.h_px) * 0.28))
         for (px, py, sx, sy) in ((x1, y1, 1, 1), (x2, y1, -1, 1),
                                   (x1, y2, 1, -1), (x2, y2, -1, -1)):
-            px += sx * gap
-            py += sy * gap
-            cv2.line(img, (px, py), (px + sx * L, py), color, thick)
-            cv2.line(img, (px, py), (px, py + sy * L), color, thick)
-
-    def _draw_lock(self, img, d, blink):
-        """เอฟเฟกต์ล็อกมิสไซล์สีแดง: เส้นวิ่งเข้าจากมุมจอ + กรอบเต้นเป็นจังหวะ
-        + เพชรกลางเป้า + วงพัลส์ — สไตล์ระบบล็อกเป้าเครื่องบินรบ"""
-        h, w = img.shape[:2]
-        cx, cy = int(d.cx), int(d.cy)
-        phase = time.time() * 7
-        pulse = int(4 + 7 * abs(math.sin(phase)))          # ระยะกรอบเต้น 4..11
-
-        # เส้นล็อกวิ่งเข้าหาเป้าจาก 4 มุมจอ (dim red) — หัวใจของลุค missile lock
-        for corner in ((0, 0), (w, 0), (0, h), (w, h)):
-            cv2.line(img, corner, (cx, cy), (40, 40, 130), 1, cv2.LINE_AA)
-
-        self._draw_brackets(img, d, RED, 2, 5)             # กรอบแดงหลัก
-        self._draw_brackets(img, d, RED, 1, 5 + pulse)     # กรอบเต้นออก
-        cv2.circle(img, (cx, cy), 14 + pulse, RED, 1, cv2.LINE_AA)  # วงพัลส์
-        cv2.drawMarker(img, (cx, cy), RED, cv2.MARKER_DIAMOND, 16, 2)
-        cv2.drawMarker(img, (cx, cy), RED, cv2.MARKER_CROSS, 30, 1)
-
-        if blink:                                          # ป้ายกะพริบ
-            txt = "v MISSILE LOCK v"
-            (tw, _), _ = cv2.getTextSize(txt, FONT, 0.6, 2)
-            cv2.putText(img, txt, (cx - tw // 2, int(d.cy - d.h_px / 2) - 22),
-                        FONT, 0.6, RED, 2, cv2.LINE_AA)
-
-    def _draw_target(self, img, d, locked, blink):
-        if locked:
-            self._draw_lock(img, d, blink)
-            color, tag = RED, ""
-        else:
-            self._draw_brackets(img, d, GREEN, 1, 4)
-            color, tag = GREEN, ""
-        # ป้ายข้อมูลเป้า
-        rng = ""
-        try:
-            rng = f"  {ranging.distance_mm(d) / 1000:.2f}M"
-        except Exception:
-            pass
-        label = f"{d.label.upper()} {int(d.conf * 100):02d}%{rng} {tag}"
-        ly = int(d.cy - d.h_px / 2) - 8
-        cv2.putText(img, label, (int(d.cx - d.w_px / 2), max(14, ly)),
-                    FONT, 0.5, color, 1, cv2.LINE_AA)
+            px += sx * 4
+            py += sy * 4
+            cv2.line(img, (px, py), (px + sx * L, py), GREEN, 1)
+            cv2.line(img, (px, py), (px, py + sy * L), GREEN, 1)
+        label = f"{d.label.upper()} {int(d.conf * 100):02d}%"
+        cv2.putText(img, label, (x1, max(14, y1 - 8)), FONT, 0.5, GREEN, 1, cv2.LINE_AA)
 
     def _draw_chrome(self, img, blink):
         h, w = img.shape[:2]
-        # กรอบมุมจอ
         m, L = 14, 34
         for (px, py, sx, sy) in ((m, m, 1, 1), (w - m, m, -1, 1),
                                   (m, h - m, 1, -1), (w - m, h - m, -1, -1)):
             cv2.line(img, (px, py), (px + sx * L, py), GREEN, 2)
             cv2.line(img, (px, py), (px, py + sy * L), GREEN, 2)
 
-        # แถบบน
         cv2.putText(img, "COPPER DOME // TACTICAL", (m + 8, 32),
                     FONT, 0.6, GREEN, 1, cv2.LINE_AA)
         rec = "* " if blink else "  "
-        right = f"{rec}{self.mode}   PAN {self.turret.pan_angle:5.1f}   {self._fps:4.1f} FPS"
+        dist = config.RANGE_PRESETS_MM[self.range_key]
+        right = (f"{rec}{self.mode}   RNG {self.range_key.upper()} {dist / 1000:.1f}M"
+                 f"   PAN {self.turret.pan_angle:5.1f}   {self._fps:4.1f} FPS")
         (tw, _), _ = cv2.getTextSize(right, FONT, 0.55, 1)
         cv2.putText(img, right, (w - m - tw - 8, 32), FONT, 0.55, GREEN, 1, cv2.LINE_AA)
 
-        # แถบล่าง = สถานะ
         cv2.line(img, (m, h - 46), (w - m, h - 46), GREEN_DIM, 1)
         cv2.putText(img, self.status, (m + 8, h - 20),
                     FONT, 0.6, self.status_color, 1, cv2.LINE_AA)
 
     def _tint(self, img):
-        """โทนจอมอนิเตอร์: กดแดง/น้ำเงินลงนิดให้อมเขียว
-        ใช้ cv2.convertScaleAbs (SIMD ใน C) แทน numpy astype — เบากว่าหลายเท่า
-        ทำต่อเฟรม เลยต้องเร็ว ไม่งั้นเป็นคอขวดเองแม้ detect จะแยก thread แล้ว"""
+        """โทนจอมอนิเตอร์อมเขียว — cv2.convertScaleAbs (เร็ว ~6ms/เฟรม)"""
         img[:, :, 0] = cv2.convertScaleAbs(img[:, :, 0], alpha=0.75)   # B ลง 25%
         img[:, :, 2] = cv2.convertScaleAbs(img[:, :, 2], alpha=0.88)   # R ลง 12%
 
@@ -274,23 +234,18 @@ class TacticalUI:
         self._tint(img)
         blink = int(time.time() * 2) % 2 == 0
         for d in dets:
-            self._draw_target(img, d, d.label == self.locked, blink)
-        self._draw_reticle(img)
+            self._draw_hint(img, d)
+        self._draw_reticle(img, self.armed, blink)
         self._draw_chrome(img, blink)
         return img
 
     # ---------- thread ตรวจจับ (แยกจากการแสดงผล) ----------
     def _detect_worker(self):
-        """รัน detect_all บนเฟรมล่าสุดแล้วเก็บผลไว้ที่ self.dets
-        แยกจากลูปแสดงผล → วิดีโอเล่นเต็มเฟรมเรตไม่ต้องรอ YOLO (~27ms/เฟรม)
-        ตอน busy (thread ยิงเป็นเจ้าของกล้อง) พักไว้ กันแย่งเฟรมกัน
-        ตรวจเฉพาะเฟรม "ใหม่" (เทียบด้วย identity) — ไม่งั้นวน detect เฟรมเดิม
-        ซ้ำรัวๆ กิน CPU เปล่า (เห็นชัดในโหมด sim ที่ HSV เร็วมาก)"""
+        """รัน detect_all บนเฟรมล่าสุด เก็บผลไว้ที่ self.dets เป็น "ตัวช่วยเล็ง"
+        แยก thread → วิดีโอเล่นเต็มเฟรมเรตไม่รอ YOLO. ตรวจเฉพาะเฟรมใหม่ (identity)
+        กันวน detect เฟรมเดิมกิน CPU เปล่า"""
         last = None
         while self._alive:
-            if self.busy:
-                time.sleep(0.02)
-                continue
             with self._lock:
                 frame = self._latest
             if frame is None or frame is last:
@@ -312,30 +267,18 @@ class TacticalUI:
         worker.start()
         try:
             while True:
-                if self.busy:
-                    # ตอน busy thread ยิงเป็นเจ้าของกล้องแต่ผู้เดียว — main "ห้าม" อ่าน
-                    # กล้อง (VideoCapture ไม่ thread-safe) โชว์เฟรมที่ thread ยิงส่งมา
-                    # ผ่าน on_frame ถ้ายังไม่มีก็โชว์เฟรมสดล่าสุดก่อนเริ่มยิงคั่นไว้
-                    with self._lock:
-                        frame = None if self._shared_frame is None else self._shared_frame.copy()
-                        dets = list(self._shared_dets)
-                    if frame is None:
-                        frame = self._last_shown
-                else:
-                    ok, frame = self.cap.read()
-                    if not ok:
-                        continue
-                    self._last_shown = frame
-                    with self._lock:
-                        self._latest = frame          # ส่งเฟรมล่าสุดให้ worker ตรวจ
-                    dets = self.dets                  # กล่องล่าสุดจาก worker (อาจช้ากว่าเฟรมนิดหน่อย)
-
-                if frame is None:
-                    cv2.waitKey(1)                    # ยังไม่มีเฟรมให้โชว์ (busy ก่อนได้เฟรมแรก)
+                # กล้องถูกอ่านที่นี่ "ที่เดียว" — ยิงแค่หมุนล้อ/ดันลูก ไม่แตะกล้อง
+                # เลยไม่มีปัญหาแย่ง VideoCapture ระหว่าง thread
+                ok, frame = self.cap.read()
+                if not ok:
                     continue
+                self._h, self._w = frame.shape[:2]
+                with self._lock:
+                    self._latest = frame
+                dets = self.dets
+
                 cv2.imshow(win, self.render(frame, dets))
 
-                # นับ FPS
                 self._frames += 1
                 if time.time() - self._t0 >= 0.5:
                     self._fps = self._frames / (time.time() - self._t0)
@@ -344,18 +287,24 @@ class TacticalUI:
                 k = cv2.waitKey(1) & 0xFF
                 if k in (ord('q'), 27):
                     break
-                if k == ord('f'):
+                elif k == ord('f'):
                     self.start_fire()
+                elif k == ord('1'):
+                    self._set_range("near")
+                elif k == ord('2'):
+                    self._set_range("mid")
+                elif k == ord('3'):
+                    self._set_range("far")
+                elif k == ord('c'):
+                    self.turret.pan_to(config.PAN_CENTER)
+                    self.armed = False
+                    self._set_status("TURRET CENTERED", GREEN)
                 if cv2.getWindowProperty(win, cv2.WND_PROP_VISIBLE) < 1:
                     break
         finally:
-            # สั่งทุก thread หยุด แล้ว "รอ thread ยิงจบก่อน" ค่อยปิดกล้อง/ป้อม —
-            # ไม่งั้น close()/release() จะไปชนกับ aim_at/fire ที่ยังเขียน serial/อ่าน
-            # กล้องอยู่ (abort ทำให้ aim_at เด้งออกเร็ว ไม่ต้องรอจน AIM_TIMEOUT_S)
-            self._abort = True
             self._alive = False
             if self._fire_thread is not None:
-                self._fire_thread.join(timeout=4.0)   # ครอบ 1 จังหวะยิง (spinup+feed ~2.3s)
+                self._fire_thread.join(timeout=4.0)   # รอจังหวะยิงจบก่อนปิด serial
             worker.join(timeout=1.0)
             try:
                 self.turret.close()
