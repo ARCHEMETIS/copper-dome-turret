@@ -117,7 +117,9 @@ ASPECT_CORRECTION = {
 }
 
 # ---------- Vision ----------
-DETECTOR = "yolo"           # "yolo" หรือ "hsv" — YOLO เทรนรอบ 3 แล้ว (mAP50 0.963 valid / 0.965 test + ลด ghost ด้วย background 138 รูป)
+DETECTOR = "yolo"           # "yolo" หรือ "hsv" — สลับเป็น yolov8s+aug 13 ก.ค. + จูน YOLO_CONF 0.5→0.30 ให้เข้าจุดทำงาน
+                            # (ที่จุดทำงานเดิม 0.5 recall capybara ตก 0.94→0.88 เพราะโมเดลนี้ "เย็นกว่า" — ดู YOLO_CONF)
+                            # ⚠ real_size_mm/ASPECT_CORRECTION ด้านบนยัง fit จากรอบ 3 — ranging ยังไม่ถูกจนกว่าจะเก็บ+fit ใหม่
 # ผูกกับตำแหน่งโปรเจคเสมอ (ไม่ใช่ cwd) — ไม่งั้นรันจากโฟลเดอร์อื่นแล้วหาไฟล์ไม่เจอ
 YOLO_MODEL_PATH = str(_PROJECT_ROOT / "models" / "best.pt")
 
@@ -130,8 +132,10 @@ def yolo_model_tag() -> str:
     ข้ามโมเดลปนกันไม่ได้ (นิสัยการตีกรอบของแต่ละโมเดลไม่เหมือนกัน)"""
     p = Path(YOLO_MODEL_PATH)
     return f"{p.name}@{hashlib.sha1(p.read_bytes()).hexdigest()[:8]}"
-YOLO_CONF = 0.5             # ⚠ อย่าขึ้นทั้งระบบเพื่อฆ่า ghost — ตุ๊กตาท่ายาก conf ต่ำจริง
-                            # (test set: capybara p5=0.26, dino p5=0.53) ให้ประตูข้างล่างจัดการแทน
+YOLO_CONF = 0.30           # v8s+aug "เย็นกว่า" รอบ 3 (maxconf ผี 0.31 vs 0.71) → จูนลงจาก 0.5 ให้เข้าจุดทำงาน
+                            # ที่ 0.30: recall เต็ม (capybara คงที่ 0.92 ตั้งแต่ 0.30 ลงไป, dino/elephant ชนะรอบ 3) +
+                            # ghost 1/176 บน NegativeDataSet/eval (< รอบ3 2/176) เฟรมเดี่ยว → ประตูเวลากินทิ้ง
+                            # ⚠ อย่าขึ้นเกิน 0.32 — capybara ท่ายาก conf ต่ำจริง จะเริ่มตกที่ 0.35 (48→46/52)
 HSV_MIN_AREA_PX = 800       # กรอง noise เล็กๆ ทิ้ง
 
 # ---------- ประตูกัน ghost (เฉพาะ YoloDetector — HSV/sim ไม่เกี่ยว) ----------
