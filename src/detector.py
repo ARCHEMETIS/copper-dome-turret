@@ -96,7 +96,8 @@ class YoloDetector:
         โชว์กรอบ — ผีวูบ 1 เฟรมยอมรับได้ คนดูเลือกตัวจริงเองอยู่แล้ว และตอน
         กดยิงจริง aim_at() เรียก detect() ที่มีประตูครบกันไว้อีกชั้น
         ยังกรองด้วยชั้นขนาด (size sanity) เพื่อตัดผีกรอบใหญ่/เล็กผิดธรรมชาติ"""
-        results = self.model.predict(frame_bgr, conf=config.YOLO_CONF, verbose=False, device=self.device)
+        results = self.model.predict(frame_bgr, conf=config.YOLO_CONF, verbose=False,
+                                     device=self.device, imgsz=config.YOLO_DISPLAY_IMGSZ)
         out = []
         for box in results[0].boxes:
             target = _YOLO_CLASS_TO_TARGET.get(int(box.cls))

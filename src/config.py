@@ -137,6 +137,10 @@ YOLO_CONF = 0.30           # v8s+aug "เย็นกว่า" รอบ 3 (max
                             # ghost 1/176 บน NegativeDataSet/eval (< รอบ3 2/176) เฟรมเดี่ยว → ประตูเวลากินทิ้ง
                             # ⚠ อย่าขึ้นเกิน 0.32 — capybara ท่ายาก conf ต่ำจริง จะเริ่มตกที่ 0.35 (48→46/52)
 HSV_MIN_AREA_PX = 800       # กรอง noise เล็กๆ ทิ้ง
+# imgsz สำหรับ detect_all (จอมอนิเตอร์ real-time) — เล็กกว่า default 640 ให้เร็วขึ้น
+# ~10ms/เฟรม (47→37) โดยกล่องแทบไม่ต่าง (test 80 รูป: 96 vs 95) ต่ำกว่า 512 ไม่เร็ว
+# ขึ้น (ติดเพดาน overhead ต่อ call) แต่เริ่มเสี่ยงพลาด detection. aiming ยังใช้ 640
+YOLO_DISPLAY_IMGSZ = 512
 
 # ---------- ประตูกัน ghost (เฉพาะ YoloDetector — HSV/sim ไม่เกี่ยว) ----------
 # หลักฐาน+เหตุผลอยู่ docs/vision-baseline.md ข้อ 4 และ wayfinder #10:
