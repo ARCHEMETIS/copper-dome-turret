@@ -13,6 +13,7 @@
 # ป้อมหันไปตัวนั้น" ต้อง hit-test คลิกกับกล่อง detection บนภาพโดยตรง —
 # แสดงภาพเต็มความละเอียด (ไม่ย่อ) พิกัดคลิกจึงตรงกับพิกัดเฟรม 1:1
 # =============================================================
+import math
 import sys
 import threading
 import time
@@ -117,8 +118,8 @@ class TacticalUI:
                 return
             pick = min(near, key=lambda d: (x - d.cx) ** 2 + (y - d.cy) ** 2)
         self.locked = pick.label
-        self._set_status(f"TARGET LOCKED: {pick.label.upper()}  //  PRESS F TO FIRE",
-                         AMBER)
+        self._set_status(f">> MISSILE LOCK: {pick.label.upper()} <<  //  PRESS F TO FIRE",
+                         RED)
 
     # ---------- ยิง ----------
     def start_fire(self):
@@ -192,19 +193,37 @@ class TacticalUI:
             cv2.line(img, (px, py), (px + sx * L, py), color, thick)
             cv2.line(img, (px, py), (px, py + sy * L), color, thick)
 
+    def _draw_lock(self, img, d, blink):
+        """เอฟเฟกต์ล็อกมิสไซล์สีแดง: เส้นวิ่งเข้าจากมุมจอ + กรอบเต้นเป็นจังหวะ
+        + เพชรกลางเป้า + วงพัลส์ — สไตล์ระบบล็อกเป้าเครื่องบินรบ"""
+        h, w = img.shape[:2]
+        cx, cy = int(d.cx), int(d.cy)
+        phase = time.time() * 7
+        pulse = int(4 + 7 * abs(math.sin(phase)))          # ระยะกรอบเต้น 4..11
+
+        # เส้นล็อกวิ่งเข้าหาเป้าจาก 4 มุมจอ (dim red) — หัวใจของลุค missile lock
+        for corner in ((0, 0), (w, 0), (0, h), (w, h)):
+            cv2.line(img, corner, (cx, cy), (40, 40, 130), 1, cv2.LINE_AA)
+
+        self._draw_brackets(img, d, RED, 2, 5)             # กรอบแดงหลัก
+        self._draw_brackets(img, d, RED, 1, 5 + pulse)     # กรอบเต้นออก
+        cv2.circle(img, (cx, cy), 14 + pulse, RED, 1, cv2.LINE_AA)  # วงพัลส์
+        cv2.drawMarker(img, (cx, cy), RED, cv2.MARKER_DIAMOND, 16, 2)
+        cv2.drawMarker(img, (cx, cy), RED, cv2.MARKER_CROSS, 30, 1)
+
+        if blink:                                          # ป้ายกะพริบ
+            txt = "v MISSILE LOCK v"
+            (tw, _), _ = cv2.getTextSize(txt, FONT, 0.6, 2)
+            cv2.putText(img, txt, (cx - tw // 2, int(d.cy - d.h_px / 2) - 22),
+                        FONT, 0.6, RED, 2, cv2.LINE_AA)
+
     def _draw_target(self, img, d, locked, blink):
-        color = AMBER if locked else GREEN
         if locked:
-            # ล็อก: กรอบเด่น + ขามุมกะพริบ + กากบาทกลางเป้า + ป้าย LOCK
-            self._draw_brackets(img, d, color, 2, 6)
-            if blink:
-                self._draw_brackets(img, d, color, 2, 14)
-            cv2.drawMarker(img, (int(d.cx), int(d.cy)), color,
-                           cv2.MARKER_CROSS, 22, 1)
-            tag = "[ LOCK ]"
+            self._draw_lock(img, d, blink)
+            color, tag = RED, ""
         else:
-            self._draw_brackets(img, d, color, 1, 4)
-            tag = ""
+            self._draw_brackets(img, d, GREEN, 1, 4)
+            color, tag = GREEN, ""
         # ป้ายข้อมูลเป้า
         rng = ""
         try:
