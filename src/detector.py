@@ -71,7 +71,12 @@ class YoloDetector:
 
     def __init__(self):
         from ultralytics import YOLO  # import ตรงนี้ เพื่อให้โหมด hsv รันได้แม้ไม่ได้ลง ultralytics
+        import torch
         self.model = YOLO(config.YOLO_MODEL_PATH)
+        # ใช้ GPU ถ้ามี — ultralytics ไม่ auto ไป CUDA ให้ ต้องสั่งเอง ไม่งั้นตกไป
+        # CPU (~42ms/เฟรม) ทำจอมอนิเตอร์แล็ค. ย้ายโมเดลค้างบน GPU + warmup ครั้งเดียว
+        self.device = 0 if torch.cuda.is_available() else "cpu"
+        self.model.to(self.device)
         self._persist = {}   # label -> ตัวนับสะสมการเห็นเป้า
 
     def _size_plausible(self, target, w, h, frame_w) -> bool:
@@ -91,7 +96,7 @@ class YoloDetector:
         โชว์กรอบ — ผีวูบ 1 เฟรมยอมรับได้ คนดูเลือกตัวจริงเองอยู่แล้ว และตอน
         กดยิงจริง aim_at() เรียก detect() ที่มีประตูครบกันไว้อีกชั้น
         ยังกรองด้วยชั้นขนาด (size sanity) เพื่อตัดผีกรอบใหญ่/เล็กผิดธรรมชาติ"""
-        results = self.model.predict(frame_bgr, conf=config.YOLO_CONF, verbose=False)
+        results = self.model.predict(frame_bgr, conf=config.YOLO_CONF, verbose=False, device=self.device)
         out = []
         for box in results[0].boxes:
             target = _YOLO_CLASS_TO_TARGET.get(int(box.cls))
@@ -107,7 +112,7 @@ class YoloDetector:
 
     def detect(self, frame_bgr, target: str) -> Detection | None:
         want = config.TARGETS[target]["yolo_class"]
-        results = self.model.predict(frame_bgr, conf=config.YOLO_CONF, verbose=False)
+        results = self.model.predict(frame_bgr, conf=config.YOLO_CONF, verbose=False, device=self.device)
         best = None
         for box in results[0].boxes:
             if int(box.cls) != want:

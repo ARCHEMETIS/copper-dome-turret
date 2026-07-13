@@ -74,7 +74,9 @@ class TacticalUI:
         self.busy = False            # กำลังเล็ง/ยิง — thread ยิงเป็นคนอ่านกล้อง
         self.locked = None           # label เป้าที่ล็อกไว้ (None = ยังไม่เลือก)
         self.mouse = (0, 0)
-        self.dets = []               # detection ล่าสุด (main thread วาด/hit-test)
+        self.dets = []               # detection ล่าสุด (worker เขียน, main thread อ่าน/วาด)
+        self._latest = None          # เฟรมล่าสุดที่ส่งให้ worker ตรวจ
+        self._alive = False          # ธง life ของ worker thread
         self.status = "READY  //  CLICK A TARGET, PRESS F TO FIRE"
         self.status_color = GREEN
 
@@ -237,10 +239,11 @@ class TacticalUI:
                     FONT, 0.6, self.status_color, 1, cv2.LINE_AA)
 
     def _tint(self, img):
-        """โทนจอมอนิเตอร์: กดแดง/น้ำเงินลงนิดให้อมเขียว + สแกนไลน์จาง"""
-        img[:, :, 0] = (img[:, :, 0].astype("uint16") * 3 // 4).astype("uint8")   # B
-        img[:, :, 2] = (img[:, :, 2].astype("uint16") * 7 // 8).astype("uint8")   # R
-        img[::3, :, 1] = (img[::3, :, 1].astype("uint16") * 17 // 16).clip(0, 255).astype("uint8")
+        """โทนจอมอนิเตอร์: กดแดง/น้ำเงินลงนิดให้อมเขียว
+        ใช้ cv2.convertScaleAbs (SIMD ใน C) แทน numpy astype — เบากว่าหลายเท่า
+        ทำต่อเฟรม เลยต้องเร็ว ไม่งั้นเป็นคอขวดเองแม้ detect จะแยก thread แล้ว"""
+        img[:, :, 0] = cv2.convertScaleAbs(img[:, :, 0], alpha=0.75)   # B ลง 25%
+        img[:, :, 2] = cv2.convertScaleAbs(img[:, :, 2], alpha=0.88)   # R ลง 12%
 
     def render(self, frame, dets):
         img = frame.copy()
@@ -252,11 +255,33 @@ class TacticalUI:
         self._draw_chrome(img, blink)
         return img
 
+    # ---------- thread ตรวจจับ (แยกจากการแสดงผล) ----------
+    def _detect_worker(self):
+        """รัน detect_all วนบนเฟรมล่าสุดตลอด แล้วเก็บผลไว้ที่ self.dets
+        แยกจากลูปแสดงผล → วิดีโอเล่นเต็มเฟรมเรตไม่ต้องรอ YOLO (~40ms/เฟรม)
+        ตอน busy (aim_at อ่านกล้องเอง) พักไว้ กันแย่งเฟรมกัน"""
+        while self._alive:
+            if self.busy:
+                time.sleep(0.02)
+                continue
+            with self._lock:
+                frame = self._latest
+            if frame is None:
+                time.sleep(0.005)
+                continue
+            try:
+                self.dets = self.detector.detect_all(frame)
+            except Exception:
+                pass
+
     # ---------- ลูปหลัก ----------
     def run(self):
         win = "Copper Dome // Tactical"
         cv2.namedWindow(win, cv2.WINDOW_AUTOSIZE)   # AUTOSIZE = 1:1 พิกัดคลิกตรงเฟรม
         cv2.setMouseCallback(win, self.on_mouse)
+        self._alive = True
+        worker = threading.Thread(target=self._detect_worker, daemon=True)
+        worker.start()
         try:
             while True:
                 if self.busy:
@@ -271,8 +296,9 @@ class TacticalUI:
                     ok, frame = self.cap.read()
                     if not ok:
                         continue
-                    dets = self.detector.detect_all(frame)
-                    self.dets = dets
+                    with self._lock:
+                        self._latest = frame          # ส่งเฟรมล่าสุดให้ worker ตรวจ
+                    dets = self.dets                  # กล่องล่าสุดจาก worker (อาจช้ากว่าเฟรมนิดหน่อย)
 
                 cv2.imshow(win, self.render(frame, dets))
 
@@ -290,6 +316,8 @@ class TacticalUI:
                 if cv2.getWindowProperty(win, cv2.WND_PROP_VISIBLE) < 1:
                     break
         finally:
+            self._alive = False
+            worker.join(timeout=1.0)
             try:
                 self.turret.close()
                 self.cap.release()
