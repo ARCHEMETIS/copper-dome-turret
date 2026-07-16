@@ -36,6 +36,7 @@ class Turret:
         in4.write(1)
 
         self._pan_angle = float(config.PAN_CENTER)
+        self._duty = 0.0
         self.pan.write(self._pan_angle)
         self.feeder.write(config.FEEDER_REST)
         self.set_flywheel(0.0)
@@ -56,8 +57,15 @@ class Turret:
 
     # ---------- Flywheel ----------
     def set_flywheel(self, duty: float):
-        """duty 0..1 (0 = หยุด). ค่าต่ำกว่า FLYWHEEL_MIN_DUTY ล้ออาจไม่หมุน"""
+        """duty 0..1 (0 = หยุด). ค่าต่ำกว่า FLYWHEEL_MIN_DUTY ล้ออาจไม่หมุน
+        ขาขึ้น soft-start ไต่ทีละขั้น (ดูเหตุผลใน config) ขาลง/หยุด สั่งทันที"""
         duty = max(0.0, min(config.FLYWHEEL_MAX_DUTY, duty))
+        while self._duty + config.FLYWHEEL_RAMP_STEP < duty:
+            self._duty += config.FLYWHEEL_RAMP_STEP
+            self.ena.write(self._duty)
+            self.enb.write(self._duty)
+            time.sleep(config.FLYWHEEL_RAMP_STEP_S)
+        self._duty = duty
         self.ena.write(duty)
         self.enb.write(duty)
 

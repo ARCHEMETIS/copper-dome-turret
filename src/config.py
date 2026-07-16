@@ -12,6 +12,8 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # ---------- Serial / Arduino ----------
 SERIAL_PORT = None          # None = ค้นหาอัตโนมัติ, หรือระบุเอง เช่น "COM4"
                             # ดูพอร์ตได้ใน Device Manager > Ports (COM & LPT)
+                            # เครื่องหลัก: Uno โผล่เป็น COM7 (ชิป CH340) — autodetect เจอเอง
+                            # แต่ถ้าวันแข่งมีอุปกรณ์ serial อื่นเสียบอยู่ ให้ล็อกเป็น "COM7"
 
 # ---------- ขา Arduino (Uno + Sensor Shield v5) ----------
 PIN_PAN_SERVO = 9           # MG945 หมุนป้อม
@@ -36,6 +38,10 @@ FEEDER_RETURN_TIME_S = 0.4  # เวลารอ servo กลับที่พ�
 
 # ---------- Flywheel ----------
 FLYWHEEL_SPINUP_S = 1.2     # รอล้อหมุนเต็มรอบก่อนป้อนลูก
+# soft-start: ไต่ duty ขึ้นทีละขั้นแทนการกระแทก 0→เต็ม — มอเตอร์ออกตัวกระชาก
+# กระแสหลายเท่าของตอนหมุนปกติ ทำแบตวูบจน L298N ดับทั้งบอร์ด (เจอของจริง 15 ก.ค.)
+FLYWHEEL_RAMP_STEP = 0.05   # ขยับทีละกี่ duty ต่อขั้น
+FLYWHEEL_RAMP_STEP_S = 0.05 # หน่วงต่อขั้น (0→0.8 ใช้ ~0.8s) — ลงทันทีไม่ต้อง ramp
 FLYWHEEL_MIN_DUTY = 0.35    # ต่ำกว่านี้ล้อมักไม่หมุน (แรงเสียดทาน) TODO: วัดจริง
 FLYWHEEL_MAX_DUTY = 1.0
 

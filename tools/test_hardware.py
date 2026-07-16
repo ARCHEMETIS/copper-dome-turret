@@ -3,8 +3,8 @@
 # ก่อน vision/UI ต้องพิสูจน์ก่อนว่า: servo หมุนได้, ล้อหมุนได้, feeder ดันได้
 # รัน: python tools/test_hardware.py
 # =============================================================
+import msvcrt
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
@@ -13,8 +13,9 @@ import config
 import hardware
 
 HELP = """
-คำสั่ง:
+กดปุ่มเดียวสั่งได้เลย ไม่ต้อง Enter:
   a / d        หมุนป้อมซ้าย / ขวา ทีละ 5°
+  A / D        หมุนป้อมซ้าย / ขวา ทีละ 20°
   c            กลับ center
   0-9          ตั้งความเร็วล้อ (0=หยุด, 9=90%)
   f            feeder ดัน 1 ครั้ง
@@ -29,24 +30,32 @@ def main():
     duty = 0.5
     try:
         while True:
-            cmd = input(f"[pan={turret.pan_angle:.0f}° duty={duty:.1f}] > ").strip().lower()
-            if cmd == "q":
+            print(f"\r[pan={turret.pan_angle:.0f}° duty={duty:.1f}] > ", end="", flush=True)
+            cmd = msvcrt.getwch()  # อ่านทีละปุ่ม ไม่ต้องรอ Enter
+            if cmd.lower() == "q":
+                print()
                 break
             elif cmd == "a":
                 turret.pan_by(-5)
             elif cmd == "d":
                 turret.pan_by(+5)
+            elif cmd == "A":
+                turret.pan_by(-20)
+            elif cmd == "D":
+                turret.pan_by(+20)
             elif cmd == "c":
                 turret.pan_to(config.PAN_CENTER)
             elif cmd == "f":
                 turret.feed_one()
             elif cmd == "t":
-                print(f"ยิงที่ duty {duty} ...")
+                print(f"\nยิงที่ duty {duty} ...")
                 turret.fire(duty)
             elif cmd.isdigit():
                 duty = int(cmd) / 10
                 turret.set_flywheel(duty)
-                print(f"ล้อหมุนที่ {duty * 100:.0f}%")
+                print(f"\nล้อหมุนที่ {duty * 100:.0f}%")
+            elif cmd in ("\r", "\n"):
+                pass  # เผลอกด Enter = เฉยๆ ไม่ต้องโชว์ help
             else:
                 print(HELP)
     finally:
