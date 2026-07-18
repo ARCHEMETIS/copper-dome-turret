@@ -1,6 +1,7 @@
 # =============================================================
 # test_hardware.py — ทดสอบฮาร์ดแวร์ทีละส่วน "รันไฟล์นี้เป็นไฟล์แรก"
-# ก่อน vision/UI ต้องพิสูจน์ก่อนว่า: servo หมุนได้, ล้อหมุนได้, feeder ดันได้
+# ก่อน vision/UI ต้องพิสูจน์ก่อนว่า: pan/tilt servo หมุนได้, มอเตอร์ดึงสายทำงาน,
+# cam_switch จับจังหวะได้, ยิงลูกออก (= 5 คะแนนแรกของเกณฑ์)
 # รัน: python tools/test_hardware.py
 # =============================================================
 import msvcrt
@@ -16,10 +17,11 @@ HELP = """
 กดปุ่มเดียวสั่งได้เลย ไม่ต้อง Enter:
   a / d        หมุนป้อมซ้าย / ขวา ทีละ 5°
   A / D        หมุนป้อมซ้าย / ขวา ทีละ 20°
-  c            กลับ center
-  0-9          ตั้งความเร็วล้อ (0=หยุด, 9=90%)
-  f            feeder ดัน 1 ครั้ง
-  t            ยิงจริง 1 นัด (spin-up → feed → stop) ที่ duty ล่าสุด
+  w / s        มุมเงยขึ้น / ลง ทีละ 5°
+  c            กลับ center (pan + tilt)
+  t            ดึง+ปล่อย 1 นัด (draw_and_release เดี่ยวๆ ไม่ยุ่งกับ tilt)
+  f            ยิงจริง 1 นัด (tilt_to มุมปัจจุบัน → draw_and_release) ที่มุมเงยล่าสุด
+  x            อ่านสถานะ cam_switch ตอนนี้ (True=ไม่สัมผัส, False=สัมผัส/พร้อมยิง)
   q            ออก
 """
 
@@ -27,10 +29,10 @@ def main():
     print("กำลังต่อ Arduino ...")
     turret = hardware.Turret()
     print("ต่อสำเร็จ!", HELP)
-    duty = 0.5
     try:
         while True:
-            print(f"\r[pan={turret.pan_angle:.0f}° duty={duty:.1f}] > ", end="", flush=True)
+            print(f"\r[pan={turret.pan_angle:.0f}° tilt={turret.tilt_angle:.0f}°] > ",
+                  end="", flush=True)
             cmd = msvcrt.getwch()  # อ่านทีละปุ่ม ไม่ต้องรอ Enter
             if cmd.lower() == "q":
                 print()
@@ -43,17 +45,21 @@ def main():
                 turret.pan_by(-20)
             elif cmd == "D":
                 turret.pan_by(+20)
+            elif cmd == "w":
+                turret.tilt_by(+5)
+            elif cmd == "s":
+                turret.tilt_by(-5)
             elif cmd == "c":
                 turret.pan_to(config.PAN_CENTER)
-            elif cmd == "f":
-                turret.feed_one()
+                turret.tilt_to(config.TILT_CENTER)
             elif cmd == "t":
-                print(f"\nยิงที่ duty {duty} ...")
-                turret.fire(duty)
-            elif cmd.isdigit():
-                duty = int(cmd) / 10
-                turret.set_flywheel(duty)
-                print(f"\nล้อหมุนที่ {duty * 100:.0f}%")
+                print("\nดึง+ปล่อย 1 นัด ...")
+                turret.draw_and_release()
+            elif cmd == "f":
+                print(f"\nยิงที่มุมเงย {turret.tilt_angle:.0f}° ...")
+                turret.fire(turret.tilt_angle)
+            elif cmd == "x":
+                print(f"\ncam_switch = {turret.cam_switch.value}")
             elif cmd in ("\r", "\n"):
                 pass  # เผลอกด Enter = เฉยๆ ไม่ต้องโชว์ help
             else:

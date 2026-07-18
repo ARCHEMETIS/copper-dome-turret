@@ -123,7 +123,7 @@ def main():
                   f"(จริง {true_dist:.0f}, เพี้ยน {err:.0f} mm)")
             if err > 100:
                 failures.append(f"รอบ {round_no}: วัดระยะ {label} เพี้ยน {err:.0f} mm")
-            turret.fire(ranging.duty_for_distance(dist))
+            turret.fire(ranging.angle_for_distance(dist))
 
     print()
     if failures:

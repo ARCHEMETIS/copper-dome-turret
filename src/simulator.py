@@ -42,7 +42,7 @@ class SimWorld:
         for label, az in zip(config.TARGETS, azimuths):
             self.targets[label] = {
                 "az": az + random.uniform(-3, 3),      # มุมเป้า (หน่วยเดียวกับ pan)
-                "dist": random.uniform(1100, 1900),    # อยู่ในช่วงตาราง PWM
+                "dist": random.uniform(1600, 2300),    # อยู่ในช่วงตาราง TILT_ANGLE_TABLE
             }
 
 
@@ -65,18 +65,18 @@ class SimTurret:
     def pan_by(self, delta_deg: float):
         self.pan_to(self._pan + delta_deg)
 
-    def set_flywheel(self, duty: float):
+    def tilt_to(self, angle: float):
         pass
 
-    def feed_one(self):
-        time.sleep(0.2)
+    def tilt_by(self, delta_deg: float):
+        pass
 
-    def fire(self, duty: float):
-        time.sleep(0.4)  # แทนเวลา spin-up (ย่อให้เร็วกว่าจริง)
+    def fire(self, tilt_angle: float):
+        time.sleep(0.4)  # แทนเวลาดึง+ปล่อยเฟือง (ย่อให้เร็วกว่าจริง)
 
-        # ลูก "ตกจริง" ที่ระยะไหน = ตีความตาราง PWM กลับด้าน (สมมติตารางแม่น)
-        table = sorted(config.PWM_DISTANCE_TABLE)
-        shot_dist = float(np.interp(duty, [p for _, p in table], [d for d, _ in table]))
+        # ลูก "ตกจริง" ที่ระยะไหน = ตีความตาราง TILT_ANGLE_TABLE กลับด้าน (สมมติตารางแม่น)
+        table = sorted(config.TILT_ANGLE_TABLE)
+        shot_dist = float(np.interp(tilt_angle, [a for _, a in table], [d for d, _ in table]))
 
         # เป้าที่ใกล้แนวเล็งที่สุดคือเป้าที่ลูกพุ่งไปหา
         label, t = min(self.world.targets.items(),
@@ -87,7 +87,7 @@ class SimTurret:
         hit = az_err < 2.0 and dist_err < 150   # เกณฑ์โดน: เล็งเพี้ยน <2° และระยะเพี้ยน <15 cm
         self.shots += 1
         self.hits += hit
-        print(f"[SIM] duty={duty:.2f} ลูกตก {shot_dist:.0f} mm | เป้า {label}: "
+        print(f"[SIM] tilt={tilt_angle:.0f}° ลูกตก {shot_dist:.0f} mm | เป้า {label}: "
               f"มุมเพี้ยน {az_err:.1f}° ระยะเพี้ยน {dist_err:.0f} mm → "
               f"{'🎯 โดน!' if hit else '❌ พลาด'}  (สถิติ {self.hits}/{self.shots})")
 

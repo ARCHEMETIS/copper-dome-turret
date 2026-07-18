@@ -39,12 +39,13 @@ class _NullTurret:
     """ป้อมหลอกสำหรับโหมด --webcam: ดูภาพ/คลิกบนกล้องจริงได้โดยไม่ต้องต่อ
     Arduino — ทุกคำสั่งเป็น no-op (ไม่มีอะไรขยับ/ยิง)"""
     pan_angle = float(config.PAN_CENTER)
+    tilt_angle = float(config.TILT_CENTER)
 
     def pan_to(self, angle): pass
     def pan_by(self, delta): pass
-    def set_flywheel(self, duty): pass
-    def feed_one(self): pass
-    def fire(self, duty): pass
+    def tilt_to(self, angle): pass
+    def tilt_by(self, delta): pass
+    def fire(self, tilt_angle): pass
     def close(self): pass
 
 
@@ -175,9 +176,9 @@ class TacticalUI:
             RED)
 
     # ---------- ยิง ----------
-    def _duty(self):
+    def _tilt_angle(self):
         dist = config.RANGE_PRESETS_MM[self.range_key]
-        return ranging.duty_for_distance(dist), dist
+        return ranging.angle_for_distance(dist), dist
 
     def start_fire(self):
         if self.op is not None:
@@ -194,10 +195,10 @@ class TacticalUI:
 
     def _fire_sequence(self):
         try:
-            duty, dist = self._duty()
+            angle, dist = self._tilt_angle()
             self._set_status(
-                f"FIRING · {self.range_key.upper()} {dist / 1000:.1f}M · DUTY {duty:.2f}", RED)
-            self.turret.fire(duty)
+                f"FIRING · {self.range_key.upper()} {dist / 1000:.1f}M · TILT {angle:.0f}°", RED)
+            self.turret.fire(angle)
             self._set_status(f"SHOT AWAY · {self.range_key.upper()} {dist / 1000:.1f}M", GREEN)
         except Exception as e:
             self._set_status(f"ERROR: {e}", RED)

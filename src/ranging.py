@@ -1,5 +1,5 @@
 # =============================================================
-# ranging.py — วัดระยะจากขนาดวัตถุในภาพ + แปลงระยะเป็นความแรงล้อ (duty)
+# ranging.py — วัดระยะจากขนาดวัตถุในภาพ + แปลงระยะเป็นมุมเงย (tilt)
 # =============================================================
 import numpy as np
 
@@ -33,10 +33,11 @@ def distance_mm(detection) -> float:
     return dist
 
 
-def duty_for_distance(dist_mm: float) -> float:
-    """interpolate จากตาราง PWM_DISTANCE_TABLE (ยิงจริงวัดจริงเท่านั้นถึงจะแม่น)"""
-    table = sorted(config.PWM_DISTANCE_TABLE)
+def angle_for_distance(dist_mm: float) -> float:
+    """interpolate จากตาราง TILT_ANGLE_TABLE (ยิงจริงวัดจริงเท่านั้นถึงจะแม่น)
+    หน้าไม้แรงดึงคงที่ทุกนัด — คุมระยะด้วยมุมเงยแทนความแรงมอเตอร์แบบ flywheel เดิม"""
+    table = sorted(config.TILT_ANGLE_TABLE)
     dists = [d for d, _ in table]
-    duties = [p for _, p in table]
-    duty = float(np.interp(dist_mm, dists, duties))
-    return max(config.FLYWHEEL_MIN_DUTY, min(config.FLYWHEEL_MAX_DUTY, duty))
+    angles = [a for _, a in table]
+    angle = float(np.interp(dist_mm, dists, angles))
+    return max(config.TILT_MIN, min(config.TILT_MAX, angle))
