@@ -2,17 +2,18 @@
 # main_click.py — จอมอนิเตอร์ยุทธวิธี (OpenCV ล้วน) สำหรับวันแข่ง
 #   ธีมทหารเขียว + เส้น/จุดเล็งกลางจอ + ระบบล็อกเป้าแบบเครื่องบินรบ
 #
+# โหมดสโคป: กล้องติดลำกล้อง จุดเล็ง (zero) คือพิกเซลที่คาลิเบรตว่า "เป้าตรงนี้ = โดน"
 # การเล็งมี 2 ทาง:
-#   1) คลิก "ที่ตัวตุ๊กตา" (กรอบ detection) = ล็อกตุ๊กตาตัวนั้น → ป้อมหมุนไปเล็ง
-#      ให้อยู่กลางจอเอง (visual servoing ตามตุ๊กตา) เป้าเล็งแดงเกาะตุ๊กตาไว้
-#   2) สำรอง — ถ้าโมเดลมองไม่เห็น (มุมเงย/โต๊ะบัง) คลิก "ที่ว่างบนจอ" ตรงไหนก็ได้
-#      ป้อมจะหันเอาพิกเซลนั้นมากลางจอ (ไม่พึ่ง detection)
+#   1) คลิก "ที่ตัวตุ๊กตา" (กรอบ detection) = ล็อกตุ๊กตาตัวนั้น → ป้อม pan+tilt
+#      เอาเป้าเข้าจุด zero เอง (visual servoing 2 แกน) เป้าเล็งแดงเกาะตุ๊กตาไว้
+#   2) สำรอง — ถ้าโมเดลมองไม่เห็น คลิก "ที่ว่างบนจอ" ตรงไหนก็ได้
+#      ป้อมจะหันเอาพิกเซลนั้นมาที่จุด zero (ไม่พึ่ง detection)
 #
 # รันกับของจริง:  venv\Scripts\python.exe src\main_click.py
 # รันโหมดจำลอง:   venv\Scripts\python.exe src\main_click.py --sim
 #
 # ปุ่ม:  คลิกซ้ายที่ตุ๊กตา = ล็อก+หันตาม | คลิกซ้ายที่ว่าง = เล็งจุดนั้น(สำรอง)
-#        คลิกขวา = ยกเลิก/หยุดล็อก | 1/2/3 = ระยะ ใกล้/กลาง/ไกล
+#        คลิกขวา = ยกเลิก/หยุดล็อก | I/J/K/L = เลื่อนจุด zero (ตอนคาลิเบรตสโคป)
 #        C = คืนป้อมกลางลำ | F = ยิง | Q หรือ ESC = ออก
 # =============================================================
 import math
@@ -25,7 +26,6 @@ import cv2
 import aiming
 import config
 import detector as detector_mod
-import ranging
 
 # ---------- สีธีม (BGR) ----------
 GREEN = (80, 255, 80)        # เขียว HUD หลัก
@@ -45,7 +45,7 @@ class _NullTurret:
     def pan_by(self, delta): pass
     def tilt_to(self, angle): pass
     def tilt_by(self, delta): pass
-    def fire(self, tilt_angle): pass
+    def fire(self): pass
     def close(self): pass
 
 
@@ -76,7 +76,6 @@ class TacticalUI:
         self.op = None               # None | "lock" (ป้อมกำลังหันตามตุ๊กตา) | "fire"
         self.locked_label = None     # ชนิดตุ๊กตาที่ล็อก (None = ล็อกแบบพิกเซล/ยังไม่ล็อก)
         self.armed = False           # เล็งเสร็จ พร้อมยิง (โชว์เป้าเล็งแดง)
-        self.range_key = config.RANGE_DEFAULT
         self.mouse = (0, 0)
         self.dets = []               # detection ล่าสุด (worker เขียน, main อ่าน/วาด)
         self._latest = None
@@ -89,7 +88,7 @@ class TacticalUI:
         self._shared_frame = None    # เฟรมที่ thread ล็อกส่งกลับมาระหว่างหันตาม
         self._shared_dets = []
         self._lock = threading.Lock()
-        self.status = "CLICK A TOY TO LOCK  //  1/2/3 RANGE  //  F TO FIRE"
+        self.status = "CLICK A TOY TO LOCK  //  F TO FIRE"
         self.status_color = GREEN
 
         self._t0 = time.time()
@@ -105,7 +104,7 @@ class TacticalUI:
             else:
                 self.armed = False
                 self.locked_label = None
-                self._set_status("CLICK A TOY TO LOCK  //  1/2/3 RANGE  //  F TO FIRE", GREEN)
+                self._set_status("CLICK A TOY TO LOCK  //  F TO FIRE", GREEN)
             return
         if self.op is not None:
             return
@@ -114,7 +113,7 @@ class TacticalUI:
             if toy is not None:
                 self._start_lock(toy.label)        # คลิกโดนตุ๊กตา → ล็อก+หันตาม
             else:
-                self._aim_manual(x)                # คลิกที่ว่าง → เล็งพิกเซล (สำรอง)
+                self._aim_manual(x, y)             # คลิกที่ว่าง → เล็งพิกเซล (สำรอง)
 
     def _toy_under(self, x, y):
         """หา detection ที่จุดคลิกโดน (กรอบเล็กสุดถ้าซ้อน) ถ้าไม่โดนกรอบไหน
@@ -159,27 +158,27 @@ class TacticalUI:
         finally:
             self.op = None
 
+    # ---------- จุด zero ของสโคปบนจอ ----------
+    def _zero_px(self):
+        return (int(self._w / 2 + config.SCOPE_ZERO_OFFSET_PX[0]),
+                int(self._h / 2 + config.SCOPE_ZERO_OFFSET_PX[1]))
+
     # ---------- เล็งพิกเซลเอง (สำรอง เมื่อโมเดลไม่เห็น) ----------
-    def _aim_manual(self, x):
+    def _aim_manual(self, x, y):
         if config.FOCAL_PX:
-            offset = x - self._w / 2
-            angle = math.degrees(math.atan2(offset, config.FOCAL_PX))
-            self.turret.pan_by(config.AIM_SIGN * angle * config.CLICK_AIM_GAIN)
+            zx, zy = self._zero_px()
+            pan = math.degrees(math.atan2(x - zx, config.FOCAL_PX))
+            tilt = math.degrees(math.atan2(y - zy, config.FOCAL_PX))
+            self.turret.pan_by(config.AIM_SIGN * pan * config.CLICK_AIM_GAIN)
+            self.turret.tilt_by(-config.AIM_TILT_SIGN * tilt * config.CLICK_AIM_GAIN)
         self.locked_label = None
         self.armed = True
         self._announce_armed("MANUAL")
 
     def _announce_armed(self, what):
-        dist = config.RANGE_PRESETS_MM[self.range_key]
-        self._set_status(
-            f">> LOCKED: {what} · RANGE {self.range_key.upper()} {dist / 1000:.1f}M · F TO FIRE <<",
-            RED)
+        self._set_status(f">> LOCKED: {what} · ON ZERO · F TO FIRE <<", RED)
 
     # ---------- ยิง ----------
-    def _tilt_angle(self):
-        dist = config.RANGE_PRESETS_MM[self.range_key]
-        return ranging.angle_for_distance(dist), dist
-
     def start_fire(self):
         if self.op is not None:
             return
@@ -195,32 +194,30 @@ class TacticalUI:
 
     def _fire_sequence(self):
         try:
-            angle, dist = self._tilt_angle()
-            self._set_status(
-                f"FIRING · {self.range_key.upper()} {dist / 1000:.1f}M · TILT {angle:.0f}°", RED)
-            self.turret.fire(angle)
-            self._set_status(f"SHOT AWAY · {self.range_key.upper()} {dist / 1000:.1f}M", GREEN)
+            self._set_status("FIRING", RED)
+            self.turret.fire()
+            self._set_status("SHOT AWAY", GREEN)
         except Exception as e:
             self._set_status(f"ERROR: {e}", RED)
         finally:
             self.op = None
 
-    def _set_range(self, key):
-        self.range_key = key
-        if self.armed:
-            self._announce_armed(self.locked_label.upper() if self.locked_label else "MANUAL")
-        else:
-            dist = config.RANGE_PRESETS_MM[key]
-            self._set_status(f"RANGE SET: {key.upper()} {dist / 1000:.1f}M", GREEN)
+    # ---------- เลื่อนจุด zero (ตอนคาลิเบรตสโคป — ยิงจริงแล้วขยับจุดให้ทับรอยโดน) ----------
+    def _nudge_zero(self, dx, dy):
+        config.SCOPE_ZERO_OFFSET_PX[0] += dx
+        config.SCOPE_ZERO_OFFSET_PX[1] += dy
+        ox, oy = config.SCOPE_ZERO_OFFSET_PX
+        # ค่าอยู่แค่ในหน่วยความจำ — จดลง config.py ถึงจะติดถาวร (โชว์ทั้งจอและ console)
+        print(f"SCOPE_ZERO_OFFSET_PX = [{ox}, {oy}]   # copy ไปวางใน config.py")
+        self._set_status(f"ZERO OFFSET ({ox:+d}, {oy:+d})  //  จดลง config.py ด้วย!", AMBER)
 
     def _set_status(self, text, color=GREEN):
         self.status, self.status_color = text, color
 
     # ---------- วาด HUD ----------
     def _draw_reticle(self, img):
-        """เส้น/จุดเล็งกลางจอ (boresight เขียว) — จุดอ้างอิงศูนย์กลางเสมอ"""
-        h, w = img.shape[:2]
-        cx, cy = w // 2, h // 2
+        """เส้น/จุดเล็งที่จุด zero ของสโคป (เขียว) — "เป้าอยู่ตรงนี้ = โดน" """
+        cx, cy = self._zero_px()
         gap, arm = 16, 46
         cv2.line(img, (cx - arm, cy), (cx - gap, cy), GREEN, 1)
         cv2.line(img, (cx + gap, cy), (cx + arm, cy), GREEN, 1)
@@ -267,12 +264,11 @@ class TacticalUI:
             cv2.line(img, (px, py), (px + sx * L, py), GREEN, 2)
             cv2.line(img, (px, py), (px, py + sy * L), GREEN, 2)
 
-        cv2.putText(img, "COPPER DOME // TACTICAL", (m + 8, 32),
+        cv2.putText(img, "COPPER DOME // SCOPE", (m + 8, 32),
                     FONT, 0.6, GREEN, 1, cv2.LINE_AA)
         rec = "* " if blink else "  "
-        dist = config.RANGE_PRESETS_MM[self.range_key]
-        right = (f"{rec}{self.mode}   RNG {self.range_key.upper()} {dist / 1000:.1f}M"
-                 f"   PAN {self.turret.pan_angle:5.1f}   {self._fps:4.1f} FPS")
+        right = (f"{rec}{self.mode}   PAN {self.turret.pan_angle:5.1f}"
+                 f"   TILT {self.turret.tilt_angle:5.1f}   {self._fps:4.1f} FPS")
         (tw, _), _ = cv2.getTextSize(right, FONT, 0.55, 1)
         cv2.putText(img, right, (w - m - tw - 8, 32), FONT, 0.55, GREEN, 1, cv2.LINE_AA)
 
@@ -304,8 +300,9 @@ class TacticalUI:
         if locked_det is not None:        # ล็อกตุ๊กตา: เป้าแดงเกาะตุ๊กตา
             self._draw_lock(img, int(locked_det.cx), int(locked_det.cy),
                             int(locked_det.w_px / 2) + 6, int(locked_det.h_px / 2) + 6, blink)
-        elif manual:                      # ล็อกพิกเซล: เป้าแดงกลางจอ
-            self._draw_lock(img, img.shape[1] // 2, img.shape[0] // 2, 34, 34, blink)
+        elif manual:                      # ล็อกพิกเซล: เป้าแดงที่จุด zero
+            zx, zy = self._zero_px()
+            self._draw_lock(img, zx, zy, 34, 34, blink)
 
         self._draw_chrome(img, blink)
         return img
@@ -375,14 +372,17 @@ class TacticalUI:
                     break
                 elif k == ord('f'):
                     self.start_fire()
-                elif k == ord('1'):
-                    self._set_range("near")
-                elif k == ord('2'):
-                    self._set_range("mid")
-                elif k == ord('3'):
-                    self._set_range("far")
+                elif k == ord('i'):
+                    self._nudge_zero(0, -5)
+                elif k == ord('k'):
+                    self._nudge_zero(0, +5)
+                elif k == ord('j'):
+                    self._nudge_zero(-5, 0)
+                elif k == ord('l'):
+                    self._nudge_zero(+5, 0)
                 elif k == ord('c') and self.op is None:
                     self.turret.pan_to(config.PAN_CENTER)
+                    self.turret.tilt_to(config.TILT_CENTER)
                     self.armed = False
                     self.locked_label = None
                     self._set_status("TURRET CENTERED", GREEN)

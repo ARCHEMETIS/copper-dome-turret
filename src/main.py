@@ -3,8 +3,9 @@
 # รันกับของจริง:  venv\Scripts\python.exe src\main.py
 # รันโหมดจำลอง:   venv\Scripts\python.exe src\main.py --sim   (ไม่ต้องมี Arduino/กล้อง)
 #
-# ลำดับการทำงานตอนกด FIRE:
-#   เล็ง (aiming) → วัดระยะ (ranging) → คำนวณมุมเงย → ยิง (hardware)
+# ลำดับการทำงานตอนกด FIRE (โหมดสโคป):
+#   เล็ง 2 แกน (aiming — เอาเป้าเข้าจุด zero) → ยิงแรงคงที่ (hardware)
+#   ระยะที่วัดได้ (ranging) โชว์เป็นข้อมูลเฉยๆ ไม่ได้ใช้ตัดสินการยิงแล้ว
 # =============================================================
 import sys
 import threading
@@ -110,10 +111,9 @@ class App:
                 return
 
             dist = ranging.distance_mm(det)
-            angle = ranging.angle_for_distance(dist)
-            self.set_status(f"ระยะ {dist / 1000:.2f} m → มุมเงย {angle:.0f}° | กำลังยิง...")
-            self.turret.fire(angle)
-            self.set_status(f"✅ ยิงแล้ว (ระยะ {dist / 1000:.2f} m)")
+            self.set_status(f"เป้าเข้าจุด zero (ระยะ ~{dist / 1000:.2f} m) | กำลังยิง...")
+            self.turret.fire()
+            self.set_status(f"✅ ยิงแล้ว (ระยะ ~{dist / 1000:.2f} m)")
         except Exception as e:
             self.set_status(f"⚠️ {e}")
         finally:

@@ -19,8 +19,7 @@ HELP = """
   A / D        หมุนป้อมซ้าย / ขวา ทีละ 20°
   w / s        มุมเงยขึ้น / ลง ทีละ 5°
   c            กลับ center (pan + tilt)
-  t            ดึง+ปล่อย 1 นัด (draw_and_release เดี่ยวๆ ไม่ยุ่งกับ tilt)
-  f            ยิงจริง 1 นัด (tilt_to มุมปัจจุบัน → draw_and_release) ที่มุมเงยล่าสุด
+  t            ยิง 1 นัด (ดึง+ปล่อย — โหมดสโคปยิงแรงคงที่ มุมเงยตามที่ตั้งด้วย w/s)
   x            อ่านสถานะ cam_switch ตอนนี้ (True=ไม่สัมผัส, False=สัมผัส/พร้อมยิง)
   q            ออก
 """
@@ -53,11 +52,8 @@ def main():
                 turret.pan_to(config.PAN_CENTER)
                 turret.tilt_to(config.TILT_CENTER)
             elif cmd == "t":
-                print("\nดึง+ปล่อย 1 นัด ...")
-                turret.draw_and_release()
-            elif cmd == "f":
-                print(f"\nยิงที่มุมเงย {turret.tilt_angle:.0f}° ...")
-                turret.fire(turret.tilt_angle)
+                print(f"\nยิง 1 นัด (มุมเงย {turret.tilt_angle:.0f}°) ...")
+                turret.fire()
             elif cmd == "x":
                 print(f"\ncam_switch = {turret.cam_switch.value}")
             elif cmd in ("\r", "\n"):

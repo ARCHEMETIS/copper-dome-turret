@@ -1,5 +1,8 @@
 # =============================================================
-# ranging.py — วัดระยะจากขนาดวัตถุในภาพ + แปลงระยะเป็นมุมเงย (tilt)
+# ranging.py — วัดระยะจากขนาดวัตถุในภาพ
+# โหมดสโคป (18 ก.ค.): ระยะไม่ถูกใช้ตัดสินการยิงแล้ว (ยิงแรงคงที่ วิถีแบน เล็งด้วย
+# จุด zero) — เก็บไว้เป็นข้อมูลโชว์บน HUD + ประตูกัน ghost ใน detector ใช้ขอบเขต
+# ขนาดกรอบจากสูตรเดียวกันนี้
 # =============================================================
 import numpy as np
 
@@ -31,13 +34,3 @@ def distance_mm(detection) -> float:
         dist *= float(np.interp(aspect, [a for a, _ in knots],
                                 [f for _, f in knots]))
     return dist
-
-
-def angle_for_distance(dist_mm: float) -> float:
-    """interpolate จากตาราง TILT_ANGLE_TABLE (ยิงจริงวัดจริงเท่านั้นถึงจะแม่น)
-    หน้าไม้แรงดึงคงที่ทุกนัด — คุมระยะด้วยมุมเงยแทนความแรงมอเตอร์แบบ flywheel เดิม"""
-    table = sorted(config.TILT_ANGLE_TABLE)
-    dists = [d for d, _ in table]
-    angles = [a for _, a in table]
-    angle = float(np.interp(dist_mm, dists, angles))
-    return max(config.TILT_MIN, min(config.TILT_MAX, angle))

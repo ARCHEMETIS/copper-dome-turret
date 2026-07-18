@@ -76,7 +76,6 @@ class Turret:
     def tilt_to(self, angle: float):
         self._tilt_angle = self._move_servo(self.tilt, self._tilt_angle, angle,
                                             config.TILT_MIN, config.TILT_MAX)
-        time.sleep(config.TILT_SETTLE_S)
 
     def tilt_by(self, delta_deg: float):
         self.tilt_to(self._tilt_angle + delta_deg)
@@ -121,11 +120,11 @@ class Turret:
         self._wait_for_switch(want_value=False, deadline=deadline)
         self.set_draw(0.0)
 
-    # ---------- ยิง 1 นัด (รวมจังหวะทั้งหมด) ----------
-    def fire(self, tilt_angle: float):
-        """ตั้งมุมเงยตามระยะ (จาก ranging.angle_for_distance) แล้วดึง+ปล่อย 1 นัด
-        แมกกาซีน gravity-feed ป้อนลูกใหม่เข้ารางเองหลังนัดก่อนหน้า ไม่ต้อง feed แยก"""
-        self.tilt_to(tilt_angle)
+    # ---------- ยิง 1 นัด ----------
+    def fire(self):
+        """ดึง+ปล่อย 1 นัดที่แรงเต็มคงที่ — โหมดสโคป: การเล็ง (pan+tilt เอาเป้าเข้าจุด
+        zero) เสร็จก่อนเรียกยิงแล้ว ไม่มีการตั้งมุมตามระยะอีก แมกกาซีน gravity-feed
+        ป้อนลูกใหม่เข้ารางเองหลังนัดก่อนหน้า ไม่ต้อง feed แยก"""
         self.draw_and_release()
 
     def close(self):

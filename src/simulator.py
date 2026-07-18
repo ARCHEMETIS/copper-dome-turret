@@ -4,15 +4,17 @@
 #
 # มีอะไรในนี้:
 #   SimWorld  : สนามจำลอง — ตุ๊กตา 3 ตัววางสุ่มตำแหน่ง/ระยะ (สุ่มใหม่ทุกนัด
-#               ตามโจทย์ "เป้าไม่คงที่")
-#   SimTurret : ป้อมเสมือน interface เหมือน hardware.Turret เป๊ะ
-#               ตอนยิงจะตัดสินโดน/พลาดจากมุมเล็ง + ระยะตกของลูก แล้วพิมพ์สถิติ
-#   SimCamera : กล้องเสมือน — วาดภาพสนามตามมุมป้อมปัจจุบัน (ป้อมหมุน ภาพเลื่อน
-#               เหมือนกล้องติดบนป้อมจริง) สีตุ๊กตาตรงกับช่วง HSV ใน config
+#               ตามโจทย์ "เป้าไม่คงที่") ทุกตัวอยู่บนโต๊ะสูงกว่าปากกระบอก
+#               → แต่ละตัวมีมุมเงย (el) ของตัวเองตามระยะ
+#   SimTurret : ป้อมเสมือน interface เหมือน hardware.Turret เป๊ะ (pan + tilt)
+#               ตอนยิงตัดสินโดน/พลาดจาก error การเล็งทั้งสองแกน แล้วพิมพ์สถิติ
+#   SimCamera : กล้องเสมือน "ติดลำกล้อง" (โหมดสโคป) — ภาพเลื่อนทั้งแนวนอนตาม
+#               pan และแนวตั้งตาม tilt เหมือนกล้องจริงที่ขันติดกับตัวยิง
 #
-# ประโยชน์: โค้ด aiming/ranging/detector/UI ที่ใช้คือ "ตัวจริง" ทั้งหมด
+# ประโยชน์: โค้ด aiming/detector/UI ที่ใช้คือ "ตัวจริง" ทั้งหมด
 # วันที่ได้อุปกรณ์ แค่ถอด --sim ออก ระบบที่เหลือผ่านการพิสูจน์แล้ว
 # =============================================================
+import math
 import random
 import time
 
@@ -23,6 +25,7 @@ import config
 
 SIM_FOCAL_PX = 900.0                      # focal ของกล้องเสมือน
 PX_PER_DEG = config.FRAME_WIDTH / 60.0    # มุมมองภาพ (FOV) ~60°
+SIM_TARGET_RAISE_MM = 350.0               # เป้าอยู่สูงกว่าปากกระบอกเท่านี้ (โต๊ะ 800 - ฐานปืน ~450)
 
 _COLORS = {                                # BGR ที่ตกในช่วง HSV ของ config พอดี
     "dino": (0, 200, 0),                   # เขียวสด
@@ -37,21 +40,26 @@ class SimWorld:
         self.randomize()
 
     def randomize(self):
-        """สุ่มตำแหน่ง (มุม) และระยะของตุ๊กตาทั้ง 3 — ห่างกันอย่างน้อย 10°"""
+        """สุ่มตำแหน่ง (มุม) และระยะของตุ๊กตาทั้ง 3 — ห่างกันอย่างน้อย 10°
+        el = มุมเงยที่ต้องชี้ถึงจะโดน (ทุกตัวสูงเท่ากัน ต่างที่ระยะ → el ต่างกันเล็กน้อย)"""
         azimuths = random.sample(range(60, 121, 10), 3)
         for label, az in zip(config.TARGETS, azimuths):
+            dist = random.uniform(1500, 2400)          # ช่วงสนามจริง
             self.targets[label] = {
                 "az": az + random.uniform(-3, 3),      # มุมเป้า (หน่วยเดียวกับ pan)
-                "dist": random.uniform(1600, 2300),    # อยู่ในช่วงตาราง TILT_ANGLE_TABLE
+                "dist": dist,
+                "el": math.degrees(math.atan2(SIM_TARGET_RAISE_MM, dist)),
             }
 
 
 class SimTurret:
-    """แทน hardware.Turret — เมธอดครบเหมือนกันทุกตัว"""
+    """แทน hardware.Turret — เมธอดครบเหมือนกันทุกตัว
+    มุมกล้อง/ลำกล้องเหนือระนาบ = tilt_angle - TILT_CENTER (เริ่มที่ระนาบพอดี)"""
 
     def __init__(self, world: SimWorld):
         self.world = world
         self._pan = float(config.PAN_CENTER)
+        self._tilt = float(config.TILT_CENTER)
         self.shots = 0
         self.hits = 0
 
@@ -65,30 +73,36 @@ class SimTurret:
     def pan_by(self, delta_deg: float):
         self.pan_to(self._pan + delta_deg)
 
+    @property
+    def tilt_angle(self) -> float:
+        return self._tilt
+
     def tilt_to(self, angle: float):
-        pass
+        self._tilt = max(config.TILT_MIN, min(config.TILT_MAX, angle))
 
     def tilt_by(self, delta_deg: float):
-        pass
+        self.tilt_to(self._tilt + delta_deg)
 
-    def fire(self, tilt_angle: float):
+    @property
+    def pitch(self) -> float:
+        """มุมลำกล้องเหนือระนาบ (องศา)"""
+        return self._tilt - config.TILT_CENTER
+
+    def fire(self):
         time.sleep(0.4)  # แทนเวลาดึง+ปล่อยเฟือง (ย่อให้เร็วกว่าจริง)
 
-        # ลูก "ตกจริง" ที่ระยะไหน = ตีความตาราง TILT_ANGLE_TABLE กลับด้าน (สมมติตารางแม่น)
-        table = sorted(config.TILT_ANGLE_TABLE)
-        shot_dist = float(np.interp(tilt_angle, [a for _, a in table], [d for d, _ in table]))
-
+        # โหมดสโคป ยิงแรงคงที่วิถีแบน — โดน/พลาดตัดสินจาก error การเล็งล้วนๆ
         # เป้าที่ใกล้แนวเล็งที่สุดคือเป้าที่ลูกพุ่งไปหา
         label, t = min(self.world.targets.items(),
                        key=lambda kv: abs(kv[1]["az"] - self._pan))
         az_err = abs(t["az"] - self._pan)
-        dist_err = abs(t["dist"] - shot_dist)
+        el_err = abs(t["el"] - self.pitch)
 
-        hit = az_err < 2.0 and dist_err < 150   # เกณฑ์โดน: เล็งเพี้ยน <2° และระยะเพี้ยน <15 cm
+        hit = az_err < 2.0 and el_err < 2.0   # เกณฑ์โดน: เล็งเพี้ยนไม่เกิน 2° ทั้งสองแกน
         self.shots += 1
         self.hits += hit
-        print(f"[SIM] tilt={tilt_angle:.0f}° ลูกตก {shot_dist:.0f} mm | เป้า {label}: "
-              f"มุมเพี้ยน {az_err:.1f}° ระยะเพี้ยน {dist_err:.0f} mm → "
+        print(f"[SIM] pan={self._pan:.1f}° pitch={self.pitch:.1f}° | เป้า {label} "
+              f"@{t['dist']:.0f}mm: มุมเพี้ยน H {az_err:.1f}° V {el_err:.1f}° → "
               f"{'🎯 โดน!' if hit else '❌ พลาด'}  (สถิติ {self.hits}/{self.shots})")
 
         self.world.randomize()  # เป้าย้ายที่ทุกนัด — ระบบต้องเล็งใหม่จากศูนย์เสมอ
@@ -98,7 +112,7 @@ class SimTurret:
 
 
 class SimCamera:
-    """แทน cv2.VideoCapture — วาดภาพสนามตามมุมป้อมปัจจุบัน"""
+    """แทน cv2.VideoCapture — กล้องติดลำกล้อง: ภาพเลื่อนตามทั้ง pan และ tilt"""
 
     def __init__(self, world: SimWorld, turret: SimTurret):
         self.world = world
@@ -108,17 +122,24 @@ class SimCamera:
         time.sleep(0.02)  # ~50fps กัน loop วิ่งรัว CPU
         w, h = config.FRAME_WIDTH, config.FRAME_HEIGHT
         frame = np.full((h, w, 3), (245, 240, 235), np.uint8)   # พื้นหลังสว่าง
-        cv2.rectangle(frame, (0, int(h * 0.72)), (w, h), (200, 150, 80), -1)  # โต๊ะ
+
+        pitch = self.turret.pitch
+        # โต๊ะ (คร่าวๆ ไว้เป็นฉากหลัง): ขอบบนโต๊ะอยู่แนวระนาบ → เลื่อนลงเมื่อเงยขึ้น
+        table_top = int(h / 2 + pitch * PX_PER_DEG)
+        if table_top < h:
+            cv2.rectangle(frame, (0, max(0, table_top)), (w, h), (200, 150, 80), -1)
 
         # วาดตัวไกลก่อน (painter's algorithm)
         order = sorted(self.world.targets.items(), key=lambda kv: -kv[1]["dist"])
         for label, t in order:
-            # เป้าห่างจากแนวเล็งกี่องศา → กี่ pixel จากกลางภาพ
+            # แนวนอน: เป้าห่างจากแนวเล็งกี่องศา → กี่ pixel จากกลางภาพ
             dx_px = (t["az"] - self.turret.pan_angle) * PX_PER_DEG
             cx = int(w / 2 + dx_px)
+            # แนวตั้ง: เป้าสูงกว่าแนวลำกล้องกี่องศา → เหนือ/ใต้กลางภาพ
+            dy_px = (t["el"] - pitch) * PX_PER_DEG
+            cy = int(h / 2 - dy_px)
             real_w = config.TARGETS[label]["real_width_mm"]
             w_px = int(SIM_FOCAL_PX * real_w / t["dist"])   # ไกล = เล็ก (สูตรเดียวกับ ranging)
-            cy = int(h * 0.72) - int(w_px * 0.6)
 
             color = _COLORS[label]
             cv2.ellipse(frame, (cx, cy), (w_px // 2, int(w_px * 0.6)),
