@@ -39,3 +39,14 @@ NegativeDataSet/
 
 # ไฟล์ lock ชั่วคราวของ Excel
 ~$*
+
+# base weights ที่โหลดมาเทรน (ใหญ่ + auto-download เองได้)
+yolo11s.pt
+yolov8m.pt
+
+# Claude Code local settings (per-machine — subagent def + permissions)
+.claude/
+
+# ไฟล์ส่วนตัว / รายงาน session — เก็บ local ไม่ขึ้น public repo
+RESUME-คืนนี้.md
+OVERNIGHT-2026-07-22.md
