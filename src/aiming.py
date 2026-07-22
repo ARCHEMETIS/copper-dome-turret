@@ -17,6 +17,19 @@ def _step(error_px: float) -> float:
     return max(-config.AIM_MAX_STEP_DEG, min(config.AIM_MAX_STEP_DEG, step))
 
 
+def _read_fresh(cap):
+    """อ่านเฟรม "ล่าสุด" — ทิ้งเฟรมค้างใน buffer ก่อน กัน servo เล็งจากภาพ "ก่อนหมุน"
+    (loop สั่งหมุน→รอ→อ่าน; ถ้า cap.read() คืนเฟรมเก่าสุดใน buffer = แก้ error จากภาพ
+    ก่อนป้อมขยับ → อาการส่าย/ลู่เข้าช้า) ใช้ grab() ที่ไม่ decode (เร็ว) ถ้ามี —
+    SimCamera ไม่มี grab ก็อ่านปกติ. ไม่แตะ property กล้องเลย (กัน Camo จอดำจาก
+    cap.set — ดูเหตุผลใน camera.py)"""
+    grab = getattr(cap, "grab", None)
+    if grab is not None:
+        for _ in range(config.AIM_FLUSH_FRAMES):
+            grab()
+    return cap.read()
+
+
 def aim_at(turret, cap, detector, target: str, on_frame=None, should_abort=None):
     """เล็งเป้าจนอยู่ที่จุด zero ของสโคป (ทั้งสองแกน)
 
@@ -31,7 +44,7 @@ def aim_at(turret, cap, detector, target: str, on_frame=None, should_abort=None)
     while time.time() < deadline:
         if should_abort is not None and should_abort():
             return None
-        ok, frame = cap.read()
+        ok, frame = _read_fresh(cap)
         if not ok:
             continue
         det = detector.detect(frame, target)
@@ -58,7 +71,7 @@ def aim_at(turret, cap, detector, target: str, on_frame=None, should_abort=None)
             confirmed += 1
             if confirmed >= config.AIM_CONFIRM_FRAMES:
                 return det  # นิ่งที่จุด zero ติดกันพอแล้ว → พร้อมยิง
-            time.sleep(0.05)
+            time.sleep(config.AIM_CONFIRM_POLL_S)
             continue
 
         confirmed = 0
