@@ -47,6 +47,15 @@ def yolo_leg(failures):
 
         img_path = next(p for p in (test_dir / "images").glob(label_path.stem + ".*"))
         frame = cv2.imread(str(img_path))
+
+        # ข้ามรูปที่เป้ากินเฟรมใหญ่/เล็กเกินช่วงระยะใช้งานจริง (GATE_DIST_RANGE_MM)
+        # ประตูขนาดใน detector จะตีตกรูปพวกนี้ "อย่างถูกต้อง" — เอามาเป็นข้อสอบไม่ได้
+        # จำเป็นตั้งแต่ 20 ก.ค. 2026: dataset ถูก resplit ใหม่ ทำให้ 5 รูปแรกกลายเป็น
+        # ภาพระยะประชิดจากชุดของเพื่อน (ตุ๊กตากินเฟรม 28-51% = ระยะโดยนัย ~230-300mm)
+        _, _, bw_n, bh_n = (float(v) for v in lines[0].split()[1:5])
+        fh, fw = frame.shape[:2]
+        if not det._size_plausible(true_label, bw_n * fw, bh_n * fh, fw):
+            continue
         # ประตู persistence ต้องเห็นเป้าสะสมหลายเฟรมก่อนปล่อย — รูปนิ่ง = เป้า
         # อยู่ทนอยู่แล้ว จึงป้อนรูปเดิมซ้ำเท่าเกณฑ์ (เหมือนกล้องจ้องเป้านิ่งๆ)
         for _ in range(config.GATE_PERSIST_FRAMES):
