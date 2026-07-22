@@ -4,7 +4,7 @@
 #       (ไม่ใส่ = ใช้ config.YOLO_MODEL_PATH)
 #
 # วัด 3 ขา ต่อโมเดล:
-#   A) mAP50 / mAP50-95 บน dataset/test (137 รูป, label เวอร์ชันแก้แล้ว)
+#   A) mAP50 / mAP50-95 บน dataset/test (280 รูป, label เวอร์ชันแก้แล้ว)
 #      ⚠ เทียบกับเลขเก่าก่อน 10 ก.ค. ไม่ได้ — label ใน test ถูกแก้ไปแล้ว
 #   B) ghost rate บน NegativeDataSet/eval (เฟรมจากคลิป negative ดิบ
 #      คนละเฟรมกับที่เข้าเทรน แต่ "ฉากเดียวกัน" — ใช้เทียบระหว่างโมเดล/
@@ -27,7 +27,7 @@ PROJECT = Path(__file__).resolve().parent.parent
 NEG_EVAL_DIR = PROJECT / "NegativeDataSet" / "eval"
 TEST_IMAGES_DIR = PROJECT / "dataset" / "test" / "images"
 DATA_YAML = PROJECT / "dataset" / "data.yaml"
-GHOST_CONFS = (0.25, 0.50, 0.65)   # รายงาน ghost หลายระดับ conf ให้เห็นทั้งเส้น
+GHOST_CONFS = (0.25, 0.30, 0.50, 0.65)   # รวม 0.30 = จุดทำงานจริง (config.YOLO_CONF); หลายระดับให้เห็นทั้งเส้น
 BENCH_WARMUP = 20
 BENCH_RUNS = 200
 
@@ -43,7 +43,7 @@ def eval_model(model_path: str, imgsz=None, device=0, bench=False) -> dict:
 
     # --- ขา A: mAP บน test ---
     val_args = {"data": str(DATA_YAML), "split": "test", "device": device,
-                "verbose": False}
+                "verbose": False, "workers": 2}  # workers=2 บังคับ: กัน RuntimeError 1455 (Windows shared-mem) ที่ default 8
     if imgsz is not None:
         val_args["imgsz"] = imgsz
     m = model.val(**val_args)
