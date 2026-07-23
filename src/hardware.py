@@ -62,14 +62,14 @@ class Turret:
 
         # ตั้งทิศทางมอเตอร์ครั้งเดียว — ต่างกันตามกลไก
         # ถ้าหมุนผิดทาง (ลูกถูกดูดเข้าแทนพุ่งออก / ดึงสายไม่เข้า) สลับ 1/0 ของคู่ IN ตัวนั้น
-        in1.write(1)
-        in2.write(0)
         if self._is_crossbow:
-            in3.write(1)   # ทิศเดียวกับตัวแรก = ดึงสายเข้าหาตัวพร้อมกัน
-            in4.write(0)
+            dir_values = ((in1, 1), (in2, 0), (in3, 1), (in4, 0))  # ดึงสายเข้าหาตัวพร้อมกัน
         else:
-            in3.write(0)   # สวนทางตัวแรก = สองล้อหนีบลูกออกไปข้างหน้า
-            in4.write(1)
+            dir_values = ((in1, 1), (in2, 0), (in3, 0), (in4, 1))  # สวนกัน = หนีบลูกออกข้างหน้า
+        # เก็บไว้ให้ reinit_pins() สั่งซ้ำได้ถ้าบอร์ดรีเซ็ตแล้วลืม config
+        self._dir_pins = dir_values
+        for pin, value in dir_values:
+            pin.write(value)
 
         # cam_switch มีเฉพาะหน้าไม้ — โหมด flywheel ไม่ต่อสายเส้นนี้ จึงไม่เปิด sampling
         # (ถ้าเปิดทิ้งไว้ทั้งที่ไม่มีสวิตช์ = เสีย thread เปล่าและอ่านได้ค่าลอยๆ)
@@ -90,9 +90,52 @@ class Turret:
 
     # ---------- Pan / Tilt (servo ทั้งคู่ใช้จุดหมุนร่วมกัน) ----------
     def _move_servo(self, pin, current: float, angle: float, lo: float, hi: float) -> float:
+        """สั่งมุม servo — ถ้าเป็นการ "กระโดดไกล" ให้ไต่ทีละขั้นแทนการสั่งทีเดียว
+
+        ⚠ เจอจริง 23 ก.ค. ตอนทดสอบป้อม: กด c (คืนกลางลำ = สั่ง pan+tilt กระโดด
+        พร้อมกันทีเดียว) แล้วป้อมตายทั้งสองแกน ตัวเลขบนจอยังเดินต่อแต่ไม่มีอะไรขยับ
+        เหตุ: servo สองตัวเร่งพร้อมกันดึงกระแสพีค → ไฟ 5V ตก → Arduino รีเซ็ต →
+        StandardFirmata เริ่มใหม่โดยลืม config ขาทั้งหมด → คำสั่งหลังจากนั้นตกน้ำเงียบๆ
+        มอเตอร์ล้อมี soft-start กันเรื่องนี้อยู่แล้ว (set_motor_duty) แต่ servo ไม่เคยมี
+        การไต่ช่วยจำกัด slew rate = จำกัดกระแสพีค (ไม่ใช่ยาครอบจักรวาล —
+        ถ้า servo ยังกินไฟจากราง 5V ของ Arduino อยู่ ต้องแยกไฟเลี้ยงถึงจะหายจริง)"""
         angle = max(lo, min(hi, angle))
+        gap = angle - current
+        if abs(gap) > config.SERVO_GLIDE_MIN_DEG:
+            step = config.SERVO_GLIDE_STEP_DEG if gap > 0 else -config.SERVO_GLIDE_STEP_DEG
+            pos = current
+            while abs(angle - pos) > abs(step):
+                pos += step
+                pin.write(pos)
+                time.sleep(config.SERVO_GLIDE_STEP_S)
         pin.write(angle)
         return angle
+
+    def center(self):
+        """คืนกลางลำ — ไล่ทีละแกน ไม่สั่งพร้อมกัน (สองตัวออกแรงพร้อมกัน = กระแสพีคคูณสอง)"""
+        self.pan_to(config.PAN_CENTER)
+        self.tilt_to(config.TILT_CENTER)
+
+    def reinit_pins(self):
+        """สั่ง config ขาใหม่ทั้งหมด — ใช้ตอนสงสัยว่าบอร์ดรีเซ็ตตัวเอง (ไฟตก)
+
+        พอ Arduino รีเซ็ต StandardFirmata จะเริ่มใหม่โดยขาทุกขากลับเป็น input
+        ที่ยังไม่ได้ config → คำสั่ง servo/PWM ที่ Python ส่งไปหลังจากนั้น "ถูกทิ้ง
+        เงียบๆ" ฝั่ง Python ไม่มีทางรู้เลย (ไม่มี ack) การส่ง mode ใหม่ทำให้กลับมา
+        คุมได้โดยไม่ต้องถอดสาย USB เสียบใหม่"""
+        from pyfirmata2 import PWM, SERVO
+
+        self.pan.mode = SERVO
+        self.tilt.mode = SERVO
+        self.ena.mode = PWM
+        self.enb.mode = PWM
+        for pin, value in self._dir_pins:
+            pin.write(value)
+        self._duty = 0.0
+        self._write_duty(0.0)
+        # คืนมุมล่าสุดที่สั่งไว้ ไม่งั้น servo จะกระตุกไปตำแหน่ง default ของมันเอง
+        self.pan.write(self._pan_angle)
+        self.tilt.write(self._tilt_angle)
 
     @property
     def pan_angle(self) -> float:

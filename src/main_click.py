@@ -482,8 +482,7 @@ class TacticalUI:
                 elif k == ord('l'):
                     self._nudge_zero(+5, 0)
                 elif k == ord('c') and self.op is None:
-                    self.turret.pan_to(config.PAN_CENTER)
-                    self.turret.tilt_to(config.TILT_CENTER)
+                    self.turret.center()
                     self.armed = False
                     self.locked_label = None
                     self._set_status("TURRET CENTERED", GREEN)

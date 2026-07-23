@@ -41,6 +41,7 @@ HELP = """
   a / d      pan ซ้าย/ขวา 1°      |  A / D   ทีละ 5°
   w / s      tilt ขึ้น/ลง 1°       |  W / S   ทีละ 5°
   c          กลับกลางลำ
+  r          สั่ง config ขาใหม่ — ใช้ตอน "ตัวเลขเดินแต่ป้อมไม่ขยับ" (บอร์ดรีเซ็ตเพราะไฟตก)
   b          ทดสอบ slop: หมุน +5° แล้ว -5° กลับที่เดิม (ถ้าใกล้ลิมิตจะเข้าด้านในก่อน)
   i/j/k/l    เลื่อนจุด zero บน/ซ้าย/ลง/ขวา (คาลิเบรตสโคป — ทำท้ายสุด)
   f          ยิง 1 นัด (เร่งล้อ → บอกจังหวะหย่อนลูก → หยุดล้อ)
@@ -329,9 +330,16 @@ class ManualAim:
         elif ch == "S":
             self.turret.tilt_by(-STEP_COARSE)
         elif ch in ("c", "C"):
-            self.turret.pan_to(config.PAN_CENTER)
-            self.turret.tilt_to(config.TILT_CENTER)
+            self.turret.center()
             self._set("CENTERED", GREEN)
+        elif ch in ("r", "R"):
+            # กู้จากบอร์ดรีเซ็ตโดยไม่ต้องถอดสาย USB (ดู Turret.reinit_pins)
+            try:
+                self.turret.reinit_pins()
+                self._hw_fault = False
+                self._set("BOARD PINS RE-INITIALISED  //  TRY a/d NOW", AMBER)
+            except Exception as e:
+                self._set(f"RE-INIT FAILED: {e}", RED)
         elif ch in ("b", "B"):
             self._slop_test()
         elif ch in ("f", "F"):

@@ -22,6 +22,7 @@ COMMON_HELP = """
   A / D        หมุนป้อมซ้าย / ขวา ทีละ 20°
   w / s        มุมเงยขึ้น / ลง ทีละ 5°
   c            กลับ center (pan + tilt)
+  r            สั่ง config ขาใหม่ — ใช้ตอน "ตัวเลขเดินแต่ป้อมไม่ขยับ" (บอร์ดรีเซ็ตเพราะไฟตก)
   t            ยิง 1 นัด (โหมดสโคปยิงแรงคงที่ — เล็งด้วย pan/tilt ไม่ใช่ความแรง)
   q            ออก"""
 
@@ -68,8 +69,11 @@ def main():
             elif cmd == "s":
                 turret.tilt_by(-5)
             elif cmd == "c":
-                turret.pan_to(config.PAN_CENTER)
-                turret.tilt_to(config.TILT_CENTER)
+                turret.center()
+            elif cmd == "r":
+                # กู้จากบอร์ดรีเซ็ตโดยไม่ต้องถอดสาย USB (ดู Turret.reinit_pins)
+                turret.reinit_pins()
+                print("\nสั่ง config ขาใหม่แล้ว — ลองกด a/d ดูว่าป้อมกลับมาขยับไหม")
             elif cmd == "t":
                 if config.LAUNCHER == "flywheel":
                     print(f"\nเร่งล้อ {config.FLYWHEEL_SPINUP_S:.1f} วิ แล้วค้างไว้ "
