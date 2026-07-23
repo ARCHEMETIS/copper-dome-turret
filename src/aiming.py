@@ -30,6 +30,19 @@ def _read_fresh(cap):
     return cap.read()
 
 
+def _settle(cap, on_frame, det, should_abort=None):
+    """รอ ~AIM_SETTLE_S ให้ป้อม/ภาพนิ่ง แต่ "ยังดันเฟรมสดให้จอระหว่างรอ" (กันจอแลคตอนล็อก)
+    โชว์อย่างเดียว ไม่ detect/ไม่ขยับ → จังหวะ detect/servo เท่าเดิม แค่จอได้เฟรมสด ~30fps
+    แทนที่จะค้างที่เฟรมเดียวตลอด sleep. ออกก่อนได้ถ้าถูกสั่งยกเลิก"""
+    end = time.time() + config.AIM_SETTLE_S
+    while time.time() < end:
+        if should_abort is not None and should_abort():
+            return
+        ok, f = cap.read()
+        if ok and on_frame is not None:
+            on_frame(f, det)
+
+
 def aim_at(turret, cap, detector, target: str, on_frame=None, should_abort=None):
     """เล็งเป้าจนอยู่ที่จุด zero ของสโคป (ทั้งสองแกน)
 
@@ -59,7 +72,7 @@ def aim_at(turret, cap, detector, target: str, on_frame=None, should_abort=None)
                 turret.pan_to(config.PAN_MIN)
             else:
                 turret.pan_by(4)
-            time.sleep(config.AIM_SETTLE_S)
+            _settle(cap, on_frame, None, should_abort)
             continue
 
         zero_x = frame.shape[1] / 2 + config.SCOPE_ZERO_OFFSET_PX[0]
@@ -79,6 +92,6 @@ def aim_at(turret, cap, detector, target: str, on_frame=None, should_abort=None)
             turret.pan_by(config.AIM_SIGN * _step(err_x))    # หมุนหนีเป้า → แก้ AIM_SIGN
         if abs(err_y) > config.AIM_DEADBAND_PX:
             turret.tilt_by(-config.AIM_TILT_SIGN * _step(err_y))  # เงยหนีเป้า → แก้ AIM_TILT_SIGN
-        time.sleep(config.AIM_SETTLE_S)
+        _settle(cap, on_frame, det, should_abort)
 
     return None  # หมดเวลา — ถ้าเล็งสำเร็จจะ return ในลูปไปแล้ว (ตรง confirmed ครบ)

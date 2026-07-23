@@ -246,15 +246,19 @@ class TacticalUI:
         """กรอบ detection = "ตัวช่วยเล็ง" สีเขียว (โมเดลเห็นอะไร ไม่ใช่ตัวตัดสิน)"""
         x1, y1 = int(d.cx - d.w_px / 2), int(d.cy - d.h_px / 2)
         x2, y2 = int(d.cx + d.w_px / 2), int(d.cy + d.h_px / 2)
-        L = max(12, int(min(d.w_px, d.h_px) * 0.28))
+        L = max(16, int(min(d.w_px, d.h_px) * 0.32))
         for (px, py, sx, sy) in ((x1, y1, 1, 1), (x2, y1, -1, 1),
                                   (x1, y2, 1, -1), (x2, y2, -1, -1)):
             px += sx * 4
             py += sy * 4
-            cv2.line(img, (px, py), (px + sx * L, py), GREEN, 1)
-            cv2.line(img, (px, py), (px, py + sy * L), GREEN, 1)
+            cv2.line(img, (px, py), (px + sx * L, py), GREEN, 2)
+            cv2.line(img, (px, py), (px, py + sy * L), GREEN, 2)
+        # ป้ายชื่อ+conf บนแถบเข้ม ให้อ่านชัดบนพื้นหลังอะไรก็ได้
         label = f"{d.label.upper()} {int(d.conf * 100):02d}%"
-        cv2.putText(img, label, (x1, max(14, y1 - 8)), FONT, 0.5, GREEN, 1, cv2.LINE_AA)
+        (tw, th), _ = cv2.getTextSize(label, FONT, 0.55, 1)
+        ly = max(th + 8, y1 - 6)
+        cv2.rectangle(img, (x1, ly - th - 6), (x1 + tw + 8, ly + 2), (15, 35, 15), -1)
+        cv2.putText(img, label, (x1 + 4, ly - 2), FONT, 0.55, GREEN, 1, cv2.LINE_AA)
 
     def _draw_chrome(self, img, blink):
         h, w = img.shape[:2]
@@ -337,15 +341,18 @@ class TacticalUI:
         worker = threading.Thread(target=self._detect_worker, daemon=True)
         worker.start()
         try:
+            last_rendered = None      # identity ของเฟรมที่ render ไปแล้ว — กัน main loop
+                                      # วน render เฟรมเดิมซ้ำๆ ตอน lock (แย่ง GIL/lock กับ
+                                      # thread ล็อก = ต้นเหตุกระตุกจริง Codex ชี้ 22 ก.ค.)
             while True:
                 if self.op == "lock":
                     # thread ล็อกเป็นเจ้าของกล้องตอนหันตาม — main ห้ามอ่านกล้อง
                     # (VideoCapture ไม่ thread-safe) โชว์เฟรมที่มันส่งมาผ่าน on_frame
                     with self._lock:
-                        frame = None if self._shared_frame is None else self._shared_frame.copy()
+                        shared = self._shared_frame
                         dets = list(self._shared_dets)
-                    if frame is None:
-                        frame = self._last_shown
+                    frame = shared if shared is not None else self._last_shown
+                    fresh = frame is not None and frame is not last_rendered
                 else:
                     # ปกติ + ตอนยิง (fire ไม่แตะกล้อง) — main อ่านกล้องที่นี่ที่เดียว
                     ok, frame = self.cap.read()
@@ -356,18 +363,22 @@ class TacticalUI:
                     with self._lock:
                         self._latest = frame
                     dets = self.dets
+                    fresh = True
 
                 if frame is None:
                     cv2.waitKey(1)
                     continue
-                cv2.imshow(win, self.render(frame, dets))
+                # render เฉพาะตอนมี "เฟรมใหม่จริง" — ถ้าเฟรมเดิม (thread ล็อกยังไม่ส่งอันใหม่)
+                # แค่รอสั้นๆ ไม่ต้อง render/imshow ซ้ำ เปลือง CPU + แย่ง GIL กับ thread ล็อก
+                if fresh:
+                    cv2.imshow(win, self.render(frame, dets))
+                    last_rendered = frame
+                    self._frames += 1
+                    if time.time() - self._t0 >= 0.5:
+                        self._fps = self._frames / (time.time() - self._t0)
+                        self._frames, self._t0 = 0, time.time()
 
-                self._frames += 1
-                if time.time() - self._t0 >= 0.5:
-                    self._fps = self._frames / (time.time() - self._t0)
-                    self._frames, self._t0 = 0, time.time()
-
-                k = cv2.waitKey(1) & 0xFF
+                k = cv2.waitKey(1 if fresh else 15) & 0xFF
                 if k in (ord('q'), 27):
                     break
                 elif k == ord('f'):
