@@ -43,16 +43,28 @@ def _settle(cap, on_frame, det, should_abort=None):
             on_frame(f, det)
 
 
-def aim_at(turret, cap, detector, target: str, on_frame=None, should_abort=None):
+def aim_at(turret, cap, detector, target: str, on_frame=None, should_abort=None,
+           sweep: bool = True):
     """เล็งเป้าจนอยู่ที่จุด zero ของสโคป (ทั้งสองแกน)
 
     on_frame: callback(frame, detection|None) เอาไว้ให้ UI วาดภาพระหว่างเล็ง (ใส่หรือไม่ก็ได้)
     should_abort: callable() -> bool เช็คทุกรอบลูป ถ้าคืน True เลิกเล็งทันที
                   (เช่น ตอนปิดโปรแกรมกลางคัน — จะได้ไม่ต้องรอจนหมด AIM_TIMEOUT_S)
+    sweep: หาเป้าไม่เจอแล้วให้กวาดป้อมหาไหม
+           False = กรณีคนคลิกเลือกเป้าเอง (main_click) — คนหาเป้าให้แล้ว การกวาดมีแต่
+           พาป้อมเดินหนีจากตุ๊กตาที่คนเห็นอยู่กับตา แล้วไปหมดเวลาที่อื่น ตอบ None
+           ให้ UI บอก "ล็อกไม่ติด คลิกที่ว่างเพื่อเล็งเอง" เร็วๆ ดีกว่า
     คืนค่า Detection ล่าสุด (เล็งสำเร็จ) หรือ None (หาไม่เจอ/หมดเวลา/ถูกยกเลิก)
     """
     deadline = time.time() + config.AIM_TIMEOUT_S
     confirmed = 0
+    sweep_dir = +1        # ทิศกวาดปัจจุบัน (+1 = ไปทางขวา) กลับตัวเมื่อชนลิมิต
+
+    # เริ่มล็อกใหม่ = เริ่มนับประตูเวลาใหม่ ไม่งั้นตัวนับที่ค้างจากการล็อกครั้งก่อน
+    # ทำให้เฟรมแรกผ่านประตูทันที (ghost ก็ผ่าน) = ประตูหายไปเฉยๆ
+    reset = getattr(detector, "reset_persist", None)
+    if reset is not None:
+        reset(target)
 
     while time.time() < deadline:
         if should_abort is not None and should_abort():
@@ -65,13 +77,29 @@ def aim_at(turret, cap, detector, target: str, on_frame=None, should_abort=None)
             on_frame(frame, det)
 
         if det is None:
-            # ยังไม่เห็นเป้า — กวาดหาช้าๆ ไปทางขวาจนสุด แล้วเด้งกลับซ้าย (pan อย่างเดียว
-            # tilt ปล่อยไว้ที่เดิม — เป้าอยู่ระดับโต๊ะเดียวกันหมด แนวตั้งไม่ต้องกวาด)
             confirmed = 0
+            # ⚠ "ไม่ได้ detection" มี 2 ความหมาย แยกให้ออกก่อนตัดสินใจหมุน (23 ก.ค.):
+            #   (ก) ประตูเวลายังนับเฟรมไม่ครบ — เป้าอยู่ตรงหน้า แค่ยังไม่ถึงเกณฑ์
+            #   (ข) ไม่เห็นเป้าจริงๆ
+            # เดิมเหมาว่าเป็น (ข) เสมอ → ทุกครั้งที่เริ่มล็อก ตัวนับเริ่มจาก 0
+            # 2 เฟรมแรกคืน None → ป้อมหมุนหนีเป้า 4°+4° ทั้งที่ตุ๊กตาชัดเจนอยู่กลางจอ
+            warming = getattr(detector, "warming_up", None)
+            if warming is not None and warming(target):
+                _settle(cap, on_frame, None, should_abort)
+                continue
+
+            if not sweep:
+                return None   # คนคลิกเลือกเป้าให้แล้ว — หาไม่เจอให้บอกเลย อย่าเดินหนี
+
+            # กวาดหาเป้า (เฉพาะตอนไม่มีคนชี้เป้าให้) — pan อย่างเดียว tilt คาไว้
+            # (เป้าอยู่ระดับโต๊ะเดียวกันหมด แนวตั้งไม่ต้องกวาด) กลับตัวแบบ "ถอยทีละขั้น"
+            # ไม่ใช่ pan_to(PAN_MIN) รวดเดียว — อันนั้นสั่งวิ่ง 100° กระชากทีเดียว
+            # พร้อมกล้อง+สายที่ติดอยู่บนป้อม
             if turret.pan_angle >= config.PAN_MAX:
-                turret.pan_to(config.PAN_MIN)
-            else:
-                turret.pan_by(4)
+                sweep_dir = -1
+            elif turret.pan_angle <= config.PAN_MIN:
+                sweep_dir = +1
+            turret.pan_by(sweep_dir * config.AIM_SWEEP_STEP_DEG)
             _settle(cap, on_frame, None, should_abort)
             continue
 

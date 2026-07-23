@@ -18,6 +18,7 @@
 #   File > Examples > Firmata > StandardFirmata > Upload
 # หลังจากนั้นไม่ต้องเขียน/แตะโค้ด Arduino อีกเลย
 # =============================================================
+import threading
 import time
 
 from pyfirmata2 import Arduino
@@ -80,6 +81,8 @@ class Turret:
         self._pan_angle = float(config.PAN_CENTER)
         self._tilt_angle = float(config.TILT_CENTER)
         self._duty = 0.0
+        self._duty_lock = threading.Lock()
+        self._duty_seq = 0          # ดู set_motor_duty — ใช้ยกเลิกการไต่ที่ค้างอยู่
         self.pan.write(self._pan_angle)
         self.tilt.write(self._tilt_angle)
         self.set_motor_duty(0.0)
@@ -115,20 +118,49 @@ class Turret:
         self.tilt_to(self._tilt_angle + delta_deg)
 
     # ---------- มอเตอร์ (ล้อยิง หรือ มอเตอร์ดึงสาย — ใช้ ENA/ENB คู่เดียวกัน) ----------
+    def _write_duty(self, duty: float):
+        """เขียน duty ลงทั้ง ENA และ ENB — ถ้าขาแรกพัง ต้องพยายามเขียนขาที่สองให้ครบก่อน
+        ค่อยโยน error (ไม่งั้นล้อข้างเดียวค้างหมุนอยู่ตอน Arduino เริ่มมีปัญหา)"""
+        self._duty = duty
+        first_err = None
+        for pin in (self.ena, self.enb):
+            try:
+                pin.write(duty)
+            except Exception as e:
+                first_err = first_err or e
+        if first_err is not None:
+            raise first_err
+
     def set_motor_duty(self, duty: float):
         """duty 0..1 (0 = หยุด) ขาขึ้น soft-start ไต่ทีละขั้น ขาลง/หยุด สั่งทันที
 
         soft-start จำเป็นจริง: มอเตอร์ออกตัวกระชากกระแสหลายเท่าของตอนหมุนปกติ
-        เคยทำแบตวูบจน L298N ดับทั้งบอร์ดมาแล้ว (15 ก.ค. กับ flywheel ชุดนี้เอง)"""
+        เคยทำแบตวูบจน L298N ดับทั้งบอร์ดมาแล้ว (15 ก.ค. กับ flywheel ชุดนี้เอง)
+
+        ⚠ ต้อง cancel การไต่ที่ค้างอยู่ได้ (23 ก.ค. — Codex เจอ, reproduce แล้ว):
+        เดิมลูป ramp อ่าน self._duty ทุกรอบ ถ้าอีก thread สั่งหยุดระหว่างไต่
+        (กด g ฉุกเฉิน / ปิดโปรแกรม) ค่าจะถูกเซ็ตเป็น 0 แล้วลูปเดิม "ไต่กลับขึ้นไปต่อ"
+        จนเต็มสปีด = ปุ่มหยุดฉุกเฉินใช้ไม่ได้จริง. แก้ด้วยเลขลำดับคำสั่ง: ทุกคำสั่งใหม่
+        เพิ่ม _duty_seq การไต่ที่ seq ไม่ใช่ตัวล่าสุดต้องเลิกทันที"""
         duty = max(0.0, min(self._max_duty, duty))
-        while self._duty + self._ramp_step < duty:
-            self._duty += self._ramp_step
-            self.ena.write(self._duty)
-            self.enb.write(self._duty)
+        with self._duty_lock:
+            self._duty_seq += 1
+            seq = self._duty_seq
+            current = self._duty
+
+        if duty <= current:          # ขาลง/หยุด — สั่งทันที ไม่ไต่
+            self._write_duty(duty)
+            return
+
+        while True:
+            with self._duty_lock:
+                if seq != self._duty_seq:
+                    return           # มีคำสั่งใหม่แทรก (มักคือ "หยุด") — ห้ามไต่ต่อ
+                nxt = min(self._duty + self._ramp_step, duty)
+            self._write_duty(nxt)
+            if nxt >= duty:
+                return
             time.sleep(self._ramp_step_s)
-        self._duty = duty
-        self.ena.write(duty)
-        self.enb.write(duty)
 
     @property
     def motor_duty(self) -> float:
@@ -190,6 +222,8 @@ class Turret:
             self._fire_flywheel()
 
     def close(self):
+        # หยุดมอเตอร์ให้ได้ก่อนเสมอ แม้ขาใดขาหนึ่งจะ error (set_motor_duty ขาลง
+        # ยกเลิกการไต่ที่ค้างอยู่ด้วย — ดูคอมเมนต์ที่นั่น)
         try:
             self.set_motor_duty(0.0)
         finally:

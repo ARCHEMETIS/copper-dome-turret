@@ -94,6 +94,13 @@ class TacticalUI:
         self._t0 = time.time()
         self._frames = 0
         self._fps = 0.0
+        self._cam_fail = 0           # นับเฟรมที่อ่านกล้องไม่ได้ติดกัน (ดูลูปหลัก)
+        self._hw_fault = False       # เจอ error ฝั่งฮาร์ดแวร์แล้ว — ห้ามยิงต่อจนกว่าจะรีสตาร์ท
+
+        if list(config.SCOPE_ZERO_OFFSET_PX) == [0, 0]:
+            # ไม่บล็อกการยิง — ต้องยิงถึงจะคาลิเบรตได้ แต่ต้องเห็นชัดว่ายังไม่ได้ตั้ง
+            self.status = "!! SCOPE ZERO NOT CALIBRATED ([0,0]) — EXPECT SYSTEMATIC MISS !!"
+            self.status_color = AMBER
 
     # ---------- เมาส์ ----------
     def on_mouse(self, event, x, y, flags, _):
@@ -145,8 +152,12 @@ class TacticalUI:
                     self._shared_frame = frame
                     self._shared_dets = [det] if det is not None else []
 
+            # sweep=False: คนคลิกเลือกเป้าให้แล้ว ถ้าล็อกไม่ติดให้บอกเลย อย่าให้ป้อม
+            # กวาดหนีไปจากตุ๊กตาที่คนเห็นอยู่กับตา (จอใช้ conf 0.20 แต่เส้นทางเล็ง
+            # ใช้ 0.30 + ประตู — ตัวที่ conf 0.25 คลิกได้แต่ล็อกไม่ได้ เกิดขึ้นได้จริง)
             det = aiming.aim_at(self.turret, self.cap, self.detector, label,
-                                on_frame, should_abort=lambda: self._abort)
+                                on_frame, should_abort=lambda: self._abort,
+                                sweep=False)
             if det is None:
                 self.locked_label = None
                 self._set_status("LOCK FAILED  //  CLICK ANYWHERE ON SCREEN TO AIM", AMBER)
@@ -169,8 +180,23 @@ class TacticalUI:
             zx, zy = self._zero_px()
             pan = math.degrees(math.atan2(x - zx, config.FOCAL_PX))
             tilt = math.degrees(math.atan2(y - zy, config.FOCAL_PX))
+            want_pan = self.turret.pan_angle + config.AIM_SIGN * pan * config.CLICK_AIM_GAIN
+            want_tilt = (self.turret.tilt_angle
+                         - config.AIM_TILT_SIGN * tilt * config.CLICK_AIM_GAIN)
             self.turret.pan_by(config.AIM_SIGN * pan * config.CLICK_AIM_GAIN)
             self.turret.tilt_by(-config.AIM_TILT_SIGN * tilt * config.CLICK_AIM_GAIN)
+
+            # ป้อมชนลิมิตแล้วหมุนได้ไม่ครบที่ขอ = ยังไม่ได้เล็งตรงจุดที่คลิก
+            # ห้ามขึ้น "ON ZERO" (Codex เจอ 23 ก.ค.: ที่ pan 138° คลิกขวา 200px
+            # ขอ +8.1° แต่ติดเพดาน 140° เหลือ error ~6° ทั้งที่จอบอกว่าล็อกแล้ว)
+            short = max(abs(want_pan - self.turret.pan_angle),
+                        abs(want_tilt - self.turret.tilt_angle))
+            if short > 0.5:
+                self.locked_label = None
+                self.armed = False
+                self._set_status(
+                    f"AT TRAVEL LIMIT — {short:.1f}deg SHORT  //  MOVE THE TURRET BASE", AMBER)
+                return
         self.locked_label = None
         self.armed = True
         self._announce_armed("MANUAL")
@@ -184,6 +210,9 @@ class TacticalUI:
             return
         if not self.can_fire:
             self._set_status("TEST MODE  //  NO TURRET — LOCK & AIM ONLY", AMBER)
+            return
+        if self._hw_fault:
+            self._set_status("HARDWARE FAULT LATCHED  //  RESTART BEFORE FIRING", RED)
             return
         if not self.armed:
             self._set_status("LOCK A TARGET FIRST", RED)
@@ -209,7 +238,6 @@ class TacticalUI:
                     self._set_status(
                         f">>>  DROP THE BALL NOW  <<<   {end - time.time():3.1f}s LEFT", RED)
                     time.sleep(0.05)
-                self.turret.spin_down()
                 self._set_status(
                     "CANCELLED — WHEELS STOPPED" if self._abort
                     else "WHEELS STOPPED  //  F FOR NEXT SHOT", GREEN)
@@ -218,8 +246,21 @@ class TacticalUI:
                 self.turret.fire()
                 self._set_status("SHOT AWAY", GREEN)
         except Exception as e:
-            self._set_status(f"ERROR: {e}", RED)
+            # ฮาร์ดแวร์มีปัญหากลางลำ — ห้ามให้จอกลับไปสภาพ "พร้อมยิง" เฉยๆ
+            # (ล้ออาจยังหมุนอยู่ และนัดต่อไปจะเจอปัญหาเดิม) ล็อกไม่ให้ยิงจนกว่าจะรีสตาร์ท
+            self._hw_fault = True
+            self.armed = False
+            self._set_status(f"HARDWARE FAULT: {e}  //  RESTART REQUIRED", RED)
         finally:
+            # ⚠ หยุดล้อใน finally เสมอ — ถ้า throw ระหว่าง spin_up/หน้าต่างหย่อนลูก
+            # โค้ดเดิมข้าม spin_down() ไปเลย = ล้อหมุนเต็มสปีดค้างไว้ โดยมีมือคน
+            # อยู่ตรงช่องหย่อนลูกพอดี (บั๊กที่เขียนเองเมื่อเช้า 23 ก.ค.)
+            try:
+                spin_down = getattr(self.turret, "spin_down", None)
+                if spin_down is not None:
+                    spin_down()
+            except Exception:
+                pass      # พยายามหยุดแบบ best-effort — error จริงรายงานไปแล้วข้างบน
             self.op = None
 
     # ---------- เลื่อนจุด zero (ตอนคาลิเบรตสโคป — ยิงจริงแล้วขยับจุดให้ทับรอยโดน) ----------
@@ -337,6 +378,7 @@ class TacticalUI:
         ตรวจเฉพาะเฟรมใหม่ (identity) กันวน detect เฟรมเดิมกิน CPU
         พักตอน op=="lock" เพราะ thread ล็อกเป็นเจ้าของกล้องตอนนั้น"""
         last = None
+        fails = 0
         while self._alive:
             if self.op == "lock":
                 time.sleep(0.02)
@@ -349,8 +391,15 @@ class TacticalUI:
             last = frame
             try:
                 self.dets = self.detector.detect_all(frame)
-            except Exception:
-                pass
+                fails = 0
+            except Exception as e:
+                # เดิม `pass` เฉยๆ — กรอบเก่าค้างทับเฟรมใหม่ คนคลิกกรอบผีที่ไม่มีอยู่จริง
+                # แล้วไปรอ lock timeout โดยไม่มีใครรู้ว่าโมเดลตายไปแล้ว
+                self.dets = []
+                fails += 1
+                if fails == 1 or fails % 20 == 0:
+                    self._set_status(f"DETECTOR ERROR: {e}", RED)
+                time.sleep(0.2)   # ถอยหน่อย อย่ากระหน่ำเรียกซ้ำตอนพัง
 
     # ---------- ลูปหลัก ----------
     def run(self):
@@ -377,7 +426,23 @@ class TacticalUI:
                     # ปกติ + ตอนยิง (fire ไม่แตะกล้อง) — main อ่านกล้องที่นี่ที่เดียว
                     ok, frame = self.cap.read()
                     if not ok:
+                        # ⚠ ห้าม `continue` เปล่าๆ ตรงนี้ (บั๊กเดิม 23 ก.ค.) — เส้นทางนี้
+                        # ไม่ผ่าน cv2.waitKey เลย พอกล้องหลุด (จอมือถือล็อก / Camo ไม่อยู่
+                        # หน้าสุด = เคสที่เอกสารเราเขียนเองว่าเกิดบ่อย) จะกลายเป็นลูปตัน
+                        # ที่ไม่ pump event ของหน้าต่าง → Q/ESC/กากบาท/เมาส์ ตายหมด
+                        # ต้องปิดด้วย Task Manager กลางสนามแข่ง
+                        self._cam_fail += 1
+                        if self._cam_fail == 1 or self._cam_fail % 20 == 0:
+                            self._set_status(
+                                "CAMERA LOST  //  WAKE PHONE + BRING CAMO TO FRONT", RED)
+                        k = cv2.waitKey(30) & 0xFF
+                        if k in (ord('q'), 27) or \
+                                cv2.getWindowProperty(win, cv2.WND_PROP_VISIBLE) < 1:
+                            break
                         continue
+                    if self._cam_fail:
+                        self._cam_fail = 0
+                        self._set_status("CAMERA BACK  //  CLICK A TOY TO LOCK", GREEN)
                     self._h, self._w = frame.shape[:2]
                     self._last_shown = frame
                     with self._lock:
@@ -425,11 +490,17 @@ class TacticalUI:
             if self._op_thread is not None:
                 self._op_thread.join(timeout=4.0)
             worker.join(timeout=1.0)
+            # แยก try ของแต่ละอย่าง — เดิมถ้า turret.close() throw (Arduino หลุด)
+            # จะข้าม cap.release() ไปเลย ปล่อยให้ Camo ค้างจนกว่า process จะตายจริง
             try:
                 self.turret.close()
+            except Exception as e:
+                print(f"[shutdown] ปิดบอร์ดไม่สำเร็จ: {e}")
+            try:
                 self.cap.release()
-            finally:
-                cv2.destroyAllWindows()
+            except Exception as e:
+                print(f"[shutdown] ปิดกล้องไม่สำเร็จ: {e}")
+            cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":

@@ -15,6 +15,11 @@ import config
 # แมป yolo_class (เลข class ตอนเทรน) กลับเป็น target key — ใช้ตอน detect_all
 _YOLO_CLASS_TO_TARGET = {t["yolo_class"]: key for key, t in config.TARGETS.items()}
 
+# imgsz ของเส้นทางเล็ง/ตัดสินยิง (detect) — เท่ากับ default เดิมของ ultralytics
+# แต่เขียนให้ชัดเพื่อให้ warmup อุ่นขนาดเดียวกันได้ (ถ้าปล่อยเป็น default แล้ว
+# ultralytics เปลี่ยนค่า จะอุ่นผิดขนาดโดยไม่มีใครรู้). จอใช้ YOLO_DISPLAY_IMGSZ
+_AIM_IMGSZ = 640
+
 
 @dataclass
 class Detection:
@@ -57,6 +62,14 @@ class HsvDetector:
                 out.append(det)
         return out
 
+    # HSV ไม่มีประตูเวลา — มีเมธอดพวกนี้ไว้ให้ interface เหมือน YoloDetector
+    # ผู้เรียก (aiming/main_click) จะได้ไม่ต้องเช็คชนิด detector
+    def reset_persist(self, target: str | None = None):
+        pass
+
+    def warming_up(self, target: str) -> bool:
+        return False
+
 
 class YoloDetector:
     """ตรวจจับด้วย YOLO + ประตูกัน ghost 2 ชั้น (ดู docs/vision-baseline.md)
@@ -78,6 +91,14 @@ class YoloDetector:
         self.device = 0 if torch.cuda.is_available() else "cpu"
         self.model.to(self.device)
         self._persist = {}   # label -> ตัวนับสะสมการเห็นเป้า
+
+        # warmup จริง (23 ก.ค.) — คอมเมนต์ข้างบนอ้างมาตลอดว่ามี แต่โค้ดไม่เคยมี
+        # ต้องอุ่น "ทั้งสองขนาด" เพราะระบบใช้คนละ imgsz กัน (จอ 512 / เล็ง 640)
+        # และ CUDA คอมไพล์เคอร์เนลแยกตามขนาด — ไม่อุ่น = เรียกครั้งแรกของแต่ละขนาด
+        # ช้ากว่าปกติหลายเท่า (นัดแรกอืด + ค่าที่จับเวลาตอนจูนเป็น outlier)
+        blank = np.zeros((config.FRAME_HEIGHT, config.FRAME_WIDTH, 3), dtype=np.uint8)
+        for imgsz in (config.YOLO_DISPLAY_IMGSZ, _AIM_IMGSZ):
+            self.model.predict(blank, imgsz=imgsz, verbose=False, device=self.device)
 
     def _size_plausible(self, target, w, h, frame_w) -> bool:
         if config.FOCAL_PX is None:
@@ -111,23 +132,37 @@ class YoloDetector:
                                   w, h, float(box.conf)))
         return out
 
+    def reset_persist(self, target: str | None = None):
+        """ล้างตัวนับประตูเวลา — ต้องเรียกตอน "เริ่มล็อกเป้าใหม่"
+
+        ไม่ล้าง = ตัวนับค้างที่ 3 จากการล็อกครั้งก่อน แล้วการล็อกรอบถัดไปของ
+        ตุ๊กตาตัวเดิมจะผ่านประตูตั้งแต่เฟรมแรก (ghost ก็ผ่านด้วย) = ประตูหายไปเฉยๆ
+        (Codex เจอ 23 ก.ค. reproduce แล้ว: session แรก False,False,True /
+        session ถัดไปเฟรมแรก True เลย)"""
+        if target is None:
+            self._persist.clear()
+        else:
+            self._persist.pop(target, None)
+
     def detect(self, frame_bgr, target: str) -> Detection | None:
         want = config.TARGETS[target]["yolo_class"]
-        results = self.model.predict(frame_bgr, conf=config.YOLO_CONF, verbose=False, device=self.device)
+        results = self.model.predict(frame_bgr, conf=config.YOLO_CONF, verbose=False,
+                                     device=self.device, imgsz=_AIM_IMGSZ)
         best = None
         for box in results[0].boxes:
             if int(box.cls) != want:
                 continue
-            if best is None or float(box.conf) > best.conf:
-                x1, y1, x2, y2 = box.xyxy[0].tolist()
-                best = Detection(
-                    target, (x1 + x2) / 2, (y1 + y2) / 2,
-                    x2 - x1, y2 - y1, float(box.conf),
-                )
-
-        if best is not None and not self._size_plausible(
-                target, best.w_px, best.h_px, frame_bgr.shape[1]):
-            best = None
+            x1, y1, x2, y2 = box.xyxy[0].tolist()
+            w, h = x2 - x1, y2 - y1
+            # ⚠ กรองขนาด "ทุกกล่อง" ก่อนเลือกตัวชนะ — ห้ามเลือกก่อนแล้วค่อยกรอง
+            # (Codex เจอ 23 ก.ค.) เดิม: ghost ตัวใหญ่ conf 0.95 ชนะเป้าจริง conf 0.80
+            # แล้วโดนประตูขนาดตัดทิ้งทีหลัง → คืน None ทั้งที่เป้าจริงอยู่ในเฟรม
+            # = ghost หนึ่งตัวกลบเป้าจริงได้ทั้งเฟรม
+            if not self._size_plausible(target, w, h, frame_bgr.shape[1]):
+                continue
+            conf = float(box.conf)
+            if best is None or conf > best.conf:
+                best = Detection(target, (x1 + x2) / 2, (y1 + y2) / 2, w, h, conf)
 
         # ชั้นเวลา — นับสะสมต่อ label แล้วปล่อยเมื่อถึงเกณฑ์
         n = self._persist.get(target, 0)
@@ -136,6 +171,11 @@ class YoloDetector:
         if best is not None and n < config.GATE_PERSIST_FRAMES:
             return None  # ยังไม่มั่นใจว่าไม่ใช่ ghost วูบเดียว
         return best
+
+    def warming_up(self, target: str) -> bool:
+        """True = "ยังนับเฟรมไม่ครบ" ไม่ใช่ "ไม่มีเป้า" — ให้ผู้เรียกแยกสองเคสนี้ออก
+        (aiming ใช้ตัดสินว่าจะกวาดหาเป้าหรือแค่รออีกเฟรม)"""
+        return 0 < self._persist.get(target, 0) < config.GATE_PERSIST_FRAMES
 
 
 def get_detector():
