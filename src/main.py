@@ -1,11 +1,9 @@
 # =============================================================
-# main.py — โปรแกรมหลัก: UI เลือกเป้า + วิดีโอสด + ปุ่มยิง
-# รันกับของจริง:  venv\Scripts\python.exe src\main.py
-# รันโหมดจำลอง:   venv\Scripts\python.exe src\main.py --sim   (ไม่ต้องมี Arduino/กล้อง)
+# main.py — UI เลือกเป้าสำหรับโหมดจำลองเท่านั้น
+# โหมด LIVE ถูกปิด: ใช้ venv\Scripts\python.exe src\main_click.py กับฮาร์ดแวร์จริง
+# รันโหมดจำลอง: venv\Scripts\python.exe src\main.py --sim (ไม่ต้องมี Arduino/กล้อง)
 #
-# ลำดับการทำงานตอนกด FIRE (โหมดสโคป):
-#   เล็ง 2 แกน (aiming — เอาเป้าเข้าจุด zero) → ยิงแรงคงที่ (hardware)
-#   ระยะที่วัดได้ (ranging) โชว์เป็นข้อมูลเฉยๆ ไม่ได้ใช้ตัดสินการยิงแล้ว
+# ไฟล์นี้ยังเก็บ UI แบบเก่าไว้เพื่อดู simulator — ไม่ใช่ entry point สำหรับยิงจริง
 # =============================================================
 import sys
 import threading
@@ -15,29 +13,29 @@ import cv2
 from PIL import Image, ImageTk
 
 import aiming
-import camera
 import config
 import detector as detector_mod
-import hardware
 import ranging
+
+LIVE_MODE_MESSAGE = (
+    "โหมด LIVE ของ src/main.py ถูกปิดแล้วเพื่อไม่ให้ใช้ลำดับยิงเก่ากับฮาร์ดแวร์จริง\n"
+    "ให้ใช้ venv\\Scripts\\python.exe src\\main_click.py แทน"
+)
 
 
 class App:
     def __init__(self, root: tk.Tk):
+        if "--sim" not in sys.argv:
+            raise RuntimeError(LIVE_MODE_MESSAGE)
         self.root = root
         root.title("Copper Dome — Turret Control")
 
-        if "--sim" in sys.argv:
-            import simulator
-            self.cap, self.turret = simulator.create_sim()
-            root.title("Copper Dome — SIMULATION MODE")
-            # sim วาดเป้าเป็นวงรีสีทึบ (ออกแบบคู่กับช่วง HSV ใน config)
-            # YOLO เทรนจากรูปถ่ายจริง มองภาพวาดพวกนี้ไม่ออก — ต้องใช้ HSV เสมอในโหมดนี้
-            self.detector = detector_mod.HsvDetector()
-        else:
-            self.cap = camera.open_camera()
-            self.turret = hardware.Turret()
-            self.detector = detector_mod.get_detector()
+        import simulator
+        self.cap, self.turret = simulator.create_sim()
+        root.title("Copper Dome — SIMULATION MODE")
+        # sim วาดเป้าเป็นวงรีสีทึบ (ออกแบบคู่กับช่วง HSV ใน config)
+        # YOLO เทรนจากรูปถ่ายจริง มองภาพวาดพวกนี้ไม่ออก — ต้องใช้ HSV เสมอในโหมดนี้
+        self.detector = detector_mod.HsvDetector()
 
         self.busy = False           # กันกดยิงซ้อนระหว่างกำลังเล็ง/ยิง
         self.target = tk.StringVar(value="dino")
@@ -131,7 +129,15 @@ class App:
             self.root.destroy()
 
 
-if __name__ == "__main__":
+def main():
+    if "--sim" not in sys.argv:
+        print(LIVE_MODE_MESSAGE)
+        return 2
     root = tk.Tk()
     App(root)
     root.mainloop()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

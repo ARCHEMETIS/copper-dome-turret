@@ -43,7 +43,7 @@
 ```
                          PC (Python ทั้งหมด)
    ┌──────────────────────────────────────────────────────┐
-   │  main.py (tkinter UI: วิดีโอสด + เลือกเป้า + FIRE)      │
+   │  main.py (tkinter UI: simulator เท่านั้น)                │
    │     ├─ detector.py   HSV / YOLOv8n (สลับได้ใน config)  │
    │     ├─ aiming.py     visual servoing loop              │
    │     ├─ ranging.py    ระยะจากขนาด + duty จากตาราง       │
@@ -113,7 +113,8 @@ src/                        โปรแกรมหลัก
 ├── detector.py             ตรวจจับเป้า: HsvDetector / YoloDetector (interface เดียวกัน)
 ├── ranging.py              ระยะจากขนาดในภาพ + แปลงระยะ→duty (np.interp)
 ├── aiming.py               visual servoing loop (P-control + deadband + confirm frames)
-└── main.py                 tkinter UI (วิดีโอสด, เลือกเป้า, ยิงใน thread แยก)
+├── main.py                 tkinter UI สำหรับ simulator เท่านั้น
+└── main_click.py           UI กล้อง/ฮาร์ดแวร์จริงสำหรับวันแข่ง
 
 tools/                      สคริปต์สนับสนุน
 ├── test_hardware.py        ทดสอบ servo/ล้อ/feeder ด้วยคีย์บอร์ด (รันก่อนทุกไฟล์)
@@ -144,9 +145,11 @@ python -m venv venv
 venv\Scripts\python.exe -m pip install -r requirements.txt
 # 3) ทดสอบฮาร์ดแวร์
 venv\Scripts\python.exe tools\test_hardware.py
-# 4) รันระบบเต็ม
-venv\Scripts\python.exe src\main.py
+# 4) รันระบบจริง (entry point เดียวที่ใช้กับฮาร์ดแวร์)
+venv\Scripts\python.exe src\main_click.py
 ```
+
+`src\main.py` ปิดโหมด LIVE แล้วและรับเฉพาะ `--sim`; ถ้าจะใช้ฮาร์ดแวร์จริงให้รัน `src\main_click.py` เท่านั้น
 
 **ยังไม่มีฮาร์ดแวร์?** รันโหมดจำลองได้ทั้งระบบ — ป้อมเสมือน + สนามเสมือนที่สุ่มตำแหน่งเป้าใหม่ทุกนัด ใช้โค้ด vision/aiming/ranging ตัวจริงทั้งหมด:
 

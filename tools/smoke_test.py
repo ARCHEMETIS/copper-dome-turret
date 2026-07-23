@@ -6,6 +6,7 @@
 # แต่ละนัดต้องผ่านโค้ดจริงครบสาย: detector → aiming → ranging → fire
 # ผ่าน = พิมพ์ PASSED | ใช้เช็ค regression ทุกครั้งที่แก้โค้ด vision/aiming
 # =============================================================
+import copy
 import sys
 from pathlib import Path
 
@@ -16,6 +17,14 @@ import config
 import ranging
 import simulator
 from detector import HsvDetector
+
+
+def _normalise_model_names(names):
+    """แปลง model.names ทั้งแบบ dict และ list ให้เทียบกับ config ได้ตรงๆ"""
+    if isinstance(names, dict):
+        return {int(class_id): str(label).strip().lower()
+                for class_id, label in names.items()}
+    return {class_id: str(label).strip().lower() for class_id, label in enumerate(names)}
 
 
 def yolo_leg(failures):
@@ -30,32 +39,72 @@ def yolo_leg(failures):
 
     test_dir = Path(__file__).resolve().parent.parent / "dataset" / "test"
     if not test_dir.exists():
-        print("(ข้ามขา YOLO — ไม่มีโฟลเดอร์ dataset/test ในเครื่องนี้)")
+        failures.append(
+            "ล้มเหลว [ตรวจ fixture YOLO]: ไม่มีโฟลเดอร์ dataset/test "
+            "จึงยืนยันครบทุก class ไม่ได้"
+        )
         return
 
     det = YoloDetector()
-    checked = 0
+    model_names = _normalise_model_names(det.model.names)
+    config_names = {int(t["yolo_class"]): key for key, t in config.TARGETS.items()}
+    if config_names != model_names:
+        failures.append(
+            "ล้มเหลว [ตรวจ mapping YOLO]: config.TARGETS ให้ mapping "
+            f"{config_names} แต่ model.names รายงาน {model_names}"
+        )
+
+    fixtures_by_target = {target: [] for target in config.TARGETS}
     for label_path in sorted((test_dir / "labels").glob("*.txt")):
-        if checked >= 5:
-            break
-        lines = label_path.read_text().strip().splitlines()
+        lines = label_path.read_text(encoding="utf-8").strip().splitlines()
         if len(lines) != 1:
             continue  # เอาเฉพาะรูปที่มีเป้าตัวเดียว ให้เทียบ class ได้ตรงๆ
-        true_class = int(lines[0].split()[0])
-        true_label = next(k for k, v in config.TARGETS.items()
-                          if v["yolo_class"] == true_class)
+        parts = lines[0].split()
+        if len(parts) < 5:
+            continue
+        true_class = int(parts[0])
+        true_label = model_names.get(true_class)
+        if true_label not in fixtures_by_target:
+            continue
 
-        img_path = next(p for p in (test_dir / "images").glob(label_path.stem + ".*"))
+        image_paths = sorted((test_dir / "images").glob(label_path.stem + ".*"))
+        if not image_paths:
+            continue
+        img_path = image_paths[0]
         frame = cv2.imread(str(img_path))
+        if frame is None:
+            continue
 
         # ข้ามรูปที่เป้ากินเฟรมใหญ่/เล็กเกินช่วงระยะใช้งานจริง (GATE_DIST_RANGE_MM)
         # ประตูขนาดใน detector จะตีตกรูปพวกนี้ "อย่างถูกต้อง" — เอามาเป็นข้อสอบไม่ได้
         # จำเป็นตั้งแต่ 20 ก.ค. 2026: dataset ถูก resplit ใหม่ ทำให้ 5 รูปแรกกลายเป็น
         # ภาพระยะประชิดจากชุดของเพื่อน (ตุ๊กตากินเฟรม 28-51% = ระยะโดยนัย ~230-300mm)
-        _, _, bw_n, bh_n = (float(v) for v in lines[0].split()[1:5])
+        _, _, bw_n, bh_n = (float(v) for v in parts[1:5])
         fh, fw = frame.shape[:2]
         if not det._size_plausible(true_label, bw_n * fw, bh_n * fh, fw):
             continue
+        fixtures_by_target[true_label].append((img_path, frame, true_class))
+
+    for target, fixtures in fixtures_by_target.items():
+        if not fixtures:
+            failures.append(
+                f"ล้มเหลว [ตรวจ coverage YOLO]: ไม่มี fixture เดี่ยวที่ผ่าน size gate สำหรับ {target}"
+            )
+
+    # เลือกอย่างน้อยหนึ่งรูปต่อ class ก่อนเติมรูปเพิ่มให้ครบห้ารูป — กันลำดับชื่อไฟล์กิน dino ทิ้ง
+    selected = [fixtures[0] for fixtures in fixtures_by_target.values() if fixtures]
+    for offset in range(1, 5):
+        for fixtures in fixtures_by_target.values():
+            if len(selected) >= 5:
+                break
+            if len(fixtures) > offset:
+                selected.append(fixtures[offset])
+        if len(selected) >= 5:
+            break
+
+    checked = 0
+    for img_path, frame, true_class in selected:
+        true_label = model_names[true_class]
         # ประตู persistence ต้องเห็นเป้าสะสมหลายเฟรมก่อนปล่อย — รูปนิ่ง = เป้า
         # อยู่ทนอยู่แล้ว จึงป้อนรูปเดิมซ้ำเท่าเกณฑ์ (เหมือนกล้องจ้องเป้านิ่งๆ)
         for _ in range(config.GATE_PERSIST_FRAMES):
@@ -63,12 +112,15 @@ def yolo_leg(failures):
         det._persist.clear()   # กันเป้าถัดไปได้อานิสงส์ตัวนับของรูปก่อน
         checked += 1
         if d is None:
-            failures.append(f"YOLO: ไม่เจอ {true_label} ใน {img_path.name}")
+            failures.append(
+                f"ล้มเหลว [ตรวจ detection YOLO]: ควรเจอ {true_label} "
+                f"(class {true_class}) ใน {img_path.name} แต่ detector คืน None"
+            )
         else:
             print(f"YOLO | {img_path.name}: เจอ {true_label} (conf {d.conf:.2f})")
 
     if checked == 0:
-        failures.append("YOLO: ไม่มีรูป test ที่ใช้เช็คได้เลย (ทุกรูปมีหลายเป้า?)")
+        failures.append("ล้มเหลว [ตรวจ fixture YOLO]: ไม่มีรูป test ที่ผ่านเกณฑ์ให้เช็คเลย")
 
 
 def ranging_leg(failures):
@@ -113,26 +165,43 @@ def ranging_leg(failures):
 def main():
     failures = []
     ranging_leg(failures)     # ต้องมาก่อน create_sim (sim เขียนทับ config)
+    yolo_leg(failures)        # ต้องมาก่อน create_sim เช่นกัน (YOLO ใช้ calibration จริง)
 
-    cam, turret = simulator.create_sim()
-    det = HsvDetector()
+    # create_sim เขียนทับ calibration จริง — snapshot ไว้เพื่อไม่ให้ smoke test เปลี่ยน process state ถาวร
+    saved_focal = config.FOCAL_PX
+    saved_real_sizes = {label: target["real_size_mm"]
+                        for label, target in config.TARGETS.items()}
+    saved_aspect = copy.deepcopy(config.ASPECT_CORRECTION)
+    try:
+        cam, turret = simulator.create_sim()
+        det = HsvDetector()
 
-    yolo_leg(failures)
+        for round_no in range(1, 4):
+            for label in config.TARGETS:
+                d = aiming.aim_at(turret, cam, det, label)
+                if d is None:
+                    failures.append(f"รอบ {round_no}: เล็ง {label} ไม่สำเร็จ")
+                    continue
+                dist = ranging.distance_mm(d)
+                true_dist = turret.world.targets[label]["dist"]
+                err = abs(dist - true_dist)
+                print(f"รอบ {round_no} | {label}: วัดได้ {dist:.0f} mm "
+                      f"(จริง {true_dist:.0f}, เพี้ยน {err:.0f} mm)")
+                if err > 100:
+                    failures.append(f"รอบ {round_no}: วัดระยะ {label} เพี้ยน {err:.0f} mm")
+                turret.fire()
 
-    for round_no in range(1, 4):
-        for label in config.TARGETS:
-            d = aiming.aim_at(turret, cam, det, label)
-            if d is None:
-                failures.append(f"รอบ {round_no}: เล็ง {label} ไม่สำเร็จ")
-                continue
-            dist = ranging.distance_mm(d)
-            true_dist = turret.world.targets[label]["dist"]
-            err = abs(dist - true_dist)
-            print(f"รอบ {round_no} | {label}: วัดได้ {dist:.0f} mm "
-                  f"(จริง {true_dist:.0f}, เพี้ยน {err:.0f} mm)")
-            if err > 100:
-                failures.append(f"รอบ {round_no}: วัดระยะ {label} เพี้ยน {err:.0f} mm")
-            turret.fire()
+        if turret.hits < turret.shots:
+            failures.append(
+                "ล้มเหลว [ตรวจ hit simulator]: hits < shots "
+                f"({turret.hits} < {turret.shots}) — ทุกนัดที่จำลองต้องยิงโดน "
+                "จึงห้ามรายงาน PASSED เมื่อมี miss"
+            )
+    finally:
+        config.FOCAL_PX = saved_focal
+        for label, real_size in saved_real_sizes.items():
+            config.TARGETS[label]["real_size_mm"] = real_size
+        config.ASPECT_CORRECTION = saved_aspect
 
     print()
     if failures:
@@ -142,8 +211,6 @@ def main():
         sys.exit(1)
     hit_rate = f"{turret.hits}/{turret.shots}"
     print(f"✅ SMOKE TEST PASSED — เล็งสำเร็จทุกเป้า, ยิงโดน {hit_rate} ใน simulator")
-    if turret.hits < turret.shots:
-        print("   (นัดที่พลาดใน sim มาจากเกณฑ์ระยะ/มุมตึง ไม่ใช่โค้ดพัง — ดู log ด้านบน)")
 
 
 if __name__ == "__main__":

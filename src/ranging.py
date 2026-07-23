@@ -25,11 +25,19 @@ def distance_mm(detection) -> float:
     if config.FOCAL_PX is None:
         raise RuntimeError("ยังไม่ได้ calibrate FOCAL_PX — รัน tools/fit_focal.py ก่อน")
     real = config.TARGETS[detection.label]["real_size_mm"]
+    if detection.h_px <= 0:
+        raise ValueError("ความสูงกรอบในภาพต้องมากกว่า 0 ก่อนวัดระยะ")
+    if detection.w_px <= 0:
+        raise ValueError("ความกว้างกรอบในภาพต้องมากกว่า 0 ก่อนวัดระยะ")
     size_px = (detection.w_px * detection.h_px) ** 0.5
+    if size_px <= 0:
+        raise ValueError("ขนาดกรอบในภาพต้องมากกว่า 0 ก่อนวัดระยะ")
     dist = config.FOCAL_PX * real / size_px
 
     knots = config.ASPECT_CORRECTION.get(detection.label)
     if knots:
+        if detection.h_px <= 0:
+            raise ValueError("ความสูงกรอบในภาพต้องมากกว่า 0 ก่อนแก้ตามท่า")
         aspect = detection.w_px / detection.h_px
         dist *= float(np.interp(aspect, [a for a, _ in knots],
                                 [f for _, f in knots]))

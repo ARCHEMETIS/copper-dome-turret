@@ -39,7 +39,10 @@ def _settle(cap, on_frame, det, should_abort=None):
         if should_abort is not None and should_abort():
             return
         ok, f = cap.read()
-        if ok and on_frame is not None:
+        if not ok:
+            time.sleep(0.01)   # กล้องหลุด — ปกติ cap.read() คุมจังหวะลูปนี้ให้เอง
+            continue           # แต่ตอนอ่านไม่ได้มันคืนทันที = หมุน CPU เต็มจน settle หมดเวลา
+        if on_frame is not None:
             on_frame(f, det)
 
 
@@ -71,6 +74,8 @@ def aim_at(turret, cap, detector, target: str, on_frame=None, should_abort=None,
             return None
         ok, frame = _read_fresh(cap)
         if not ok:
+            # กล้องหลุดแล้ว continue เปล่าๆ จะหมุน CPU เต็ม 12 วินาทีตาม AIM_TIMEOUT_S
+            time.sleep(0.01)
             continue
         det = detector.detect(frame, target)
         if on_frame:

@@ -99,7 +99,7 @@ class TacticalUI:
 
         if list(config.SCOPE_ZERO_OFFSET_PX) == [0, 0]:
             # ไม่บล็อกการยิง — ต้องยิงถึงจะคาลิเบรตได้ แต่ต้องเห็นชัดว่ายังไม่ได้ตั้ง
-            self.status = "!! SCOPE ZERO NOT CALIBRATED ([0,0]) — EXPECT SYSTEMATIC MISS !!"
+            self.status = "!! SCOPE ZERO NOT CALIBRATED ([0,0]) - EXPECT SYSTEMATIC MISS !!"
             self.status_color = AMBER
 
     # ---------- เมาส์ ----------
@@ -202,14 +202,14 @@ class TacticalUI:
         self._announce_armed("MANUAL")
 
     def _announce_armed(self, what):
-        self._set_status(f">> LOCKED: {what} · ON ZERO · F TO FIRE <<", RED)
+        self._set_status(f">> LOCKED: {what} // ON ZERO // F TO FIRE <<", RED)
 
     # ---------- ยิง ----------
     def start_fire(self):
         if self.op is not None:
             return
         if not self.can_fire:
-            self._set_status("TEST MODE  //  NO TURRET — LOCK & AIM ONLY", AMBER)
+            self._set_status("TEST MODE  //  NO TURRET - LOCK & AIM ONLY", AMBER)
             return
         if self._hw_fault:
             self._set_status("HARDWARE FAULT LATCHED  //  RESTART BEFORE FIRING", RED)
@@ -270,10 +270,15 @@ class TacticalUI:
         ox, oy = config.SCOPE_ZERO_OFFSET_PX
         # ค่าอยู่แค่ในหน่วยความจำ — จดลง config.py ถึงจะติดถาวร (โชว์ทั้งจอและ console)
         print(f"SCOPE_ZERO_OFFSET_PX = [{ox}, {oy}]   # copy ไปวางใน config.py")
-        self._set_status(f"ZERO OFFSET ({ox:+d}, {oy:+d})  //  จดลง config.py ด้วย!", AMBER)
+        self._set_status(f"ZERO OFFSET ({ox:+d}, {oy:+d})  //  WRITE IT INTO config.py !", AMBER)
 
     def _set_status(self, text, color=GREEN):
-        self.status, self.status_color = text, color
+        # status ถูกวาดด้วย cv2.putText ซึ่งใช้ฟอนต์ Hershey = ASCII ล้วน
+        # อักขระอื่น (ไทย, em dash, ·) ออกมาเป็นกล่องว่างบนจอ. ตาข่ายกันพลาดตรงนี้
+        # ครอบ error message ที่มาจากข้างนอกด้วย (เช่น exception ภาษาไทยจาก camera.py)
+        # — ข้อความที่เราเขียนเองต้องเป็น ASCII อยู่แล้วตั้งแต่ต้นทาง
+        self.status = str(text).encode("ascii", "replace").decode("ascii")
+        self.status_color = color
 
     # ---------- วาด HUD ----------
     def _draw_reticle(self, img):

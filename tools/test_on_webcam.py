@@ -19,3 +19,4 @@ if __name__ == "__main__":
     if "--webcam" not in sys.argv:
         sys.argv.append("--webcam")   # บังคับโหมดกล้องจริง + ป้อมหลอก (ไม่ต่อ Arduino)
     main_click.TacticalUI().run()
+

@@ -41,7 +41,7 @@ HELP = """
   a / d      pan ซ้าย/ขวา 1°      |  A / D   ทีละ 5°
   w / s      tilt ขึ้น/ลง 1°       |  W / S   ทีละ 5°
   c          กลับกลางลำ
-  b          ทดสอบ slop: หมุน +5° แล้ว -5° กลับที่เดิม (ดูว่าภาพกลับจุดเดิมไหม)
+  b          ทดสอบ slop: หมุน +5° แล้ว -5° กลับที่เดิม (ถ้าใกล้ลิมิตจะเข้าด้านในก่อน)
   i/j/k/l    เลื่อนจุด zero บน/ซ้าย/ลง/ขวา (คาลิเบรตสโคป — ทำท้ายสุด)
   f          ยิง 1 นัด (เร่งล้อ → บอกจังหวะหย่อนลูก → หยุดล้อ)
   g          หยุดล้อทันที (ฉุกเฉิน)
@@ -73,6 +73,10 @@ class ManualAim:
         self.status = "MANUAL MODE  //  a-d-w-s = MOVE   F = FIRE   Q = QUIT"
         self.status_color = GREEN
         self.busy = False          # กำลังยิง/ทดสอบ slop อยู่ ห้ามสั่งซ้อน
+        self._hw_fault = False     # บอร์ด throw ระหว่างยิง — ล็อกไม่ให้ยิงต่อจนกว่าจะ restart
+        self._fire_cancel = threading.Event()  # g ต้องตัด feed window แม้ fire thread ยังอยู่
+        self._fire_thread = None
+        self._slop_thread = None   # เก็บไว้ join ตอนปิด — ไม่งั้นปิดบอร์ดทับ thread ที่ยังหมุนป้อมอยู่
         self._w, self._h = config.FRAME_WIDTH, config.FRAME_HEIGHT
         self._latest = None
         self._alive = True
@@ -97,7 +101,9 @@ class ManualAim:
                 time.sleep(0.5)
 
     def _set(self, text, color=GREEN):
-        self.status, self.status_color = text, color
+        # status ถูกส่งเข้า cv2.putText — em dash หรือข้อความ error ที่ไม่ใช่ ASCII จะกลายเป็นกล่องว่างบน HUD
+        self.status = str(text).encode("ascii", "replace").decode("ascii")
+        self.status_color = color
 
     def _zero_px(self):
         return (int(self._w / 2 + config.SCOPE_ZERO_OFFSET_PX[0]),
@@ -105,46 +111,95 @@ class ManualAim:
 
     # ---------- ยิง: เร่งล้อ → บอกให้หย่อนลูก → หยุด ----------
     def _fire(self):
+        if self._hw_fault:
+            self._set("HARDWARE FAULT LATCHED  //  RESTART REQUIRED", RED)
+            return
+
+        self._fire_cancel.clear()
+        self.busy = True
+
         def run():
-            self.busy = True
             try:
+                # ⚠ ต้องเช็ค cancel "ก่อน" spin_up ด้วย ไม่ใช่แค่หลัง — ระหว่าง
+                # thread นี้ยังไม่ทันเริ่ม ถ้าคนกด f แล้วกด g ทันที ตัว g จะสั่ง
+                # spin_down() ไปแล้ว แต่ thread เพิ่งมาถึงบรรทัดนี้พอดี แล้วเร่งล้อ
+                # ใหม่ค้างอีก FLYWHEEL_SPINUP_S วินาที "หลังจาก" กดหยุดฉุกเฉินไปแล้ว
+                if self._fire_cancel.is_set():
+                    self._set("CANCELLED BEFORE SPIN-UP - WHEELS STAY STOPPED", AMBER)
+                    return
                 self._set(f"SPINNING UP {config.FLYWHEEL_SPINUP_S:.1f}s  //  DO NOT DROP YET",
                           AMBER)
                 self.turret.spin_up()   # บล็อกจน FLYWHEEL_SPINUP_S ครบ (ล้อนิ่งแล้ว)
+                if self._fire_cancel.is_set():
+                    self._set("CANCELLED - WHEELS STOPPED", AMBER)
+                    print("ยกเลิกช่วงป้อนลูกและหยุดล้อแล้ว")
+                    return
                 end = time.time() + config.FLYWHEEL_FEED_WINDOW_S
-                while time.time() < end:
+                while time.time() < end and not self._fire_cancel.is_set():
                     self._set(f">>>  DROP THE BALL NOW  <<<   {end - time.time():3.1f}s LEFT",
                               RED)
-                    time.sleep(0.05)
-                self.turret.spin_down()
-                self._set("WINDOW CLOSED — WHEELS STOPPED  //  F FOR NEXT SHOT", GREEN)
+                    self._fire_cancel.wait(0.05)
+                if self._fire_cancel.is_set():
+                    self._set("CANCELLED - WHEELS STOPPED", AMBER)
+                    print("ยกเลิกช่วงป้อนลูกและหยุดล้อแล้ว")
+                else:
+                    self._set("WINDOW CLOSED - WHEELS STOPPED  //  F FOR NEXT SHOT", GREEN)
             except Exception as e:
-                self._set(f"ERROR: {e}", RED)
+                self._hw_fault = True
+                self._set(f"HARDWARE FAULT: {e}  //  RESTART REQUIRED", RED)
             finally:
+                # ต้องหยุดล้อแม้ spin_up/feed จะ throw — ไม่เช่นนั้นล้อจะค้างเต็ม PWM ตอนมืออยู่ที่รางป้อน
+                try:
+                    self.turret.spin_down()
+                except Exception as e:
+                    self._hw_fault = True
+                    self._set(f"HARDWARE FAULT: {e}  //  RESTART REQUIRED", RED)
                 self.busy = False
 
-        threading.Thread(target=run, daemon=True).start()
+        self._fire_thread = threading.Thread(target=run, daemon=True)
+        self._fire_thread.start()
 
     # ---------- ทดสอบ slop: ไป-กลับแล้วดูว่าภาพกลับจุดเดิมไหม ----------
     def _slop_test(self):
+        # ⚠ ตั้ง busy ที่นี่ ไม่ใช่ใน thread — ถ้าตั้งข้างใน จะมีช่องว่างระหว่าง
+        # start() กับบรรทัดแรกของ worker ที่ busy ยังเป็น False คนกด b แล้ว f รัวๆ
+        # จะผ่านด่าน busy เข้าไปสั่งยิงทับตอนป้อมกำลังหมุนทดสอบ
+        self.busy = True
+        start = self.turret.pan_angle
+
         def run():
-            self.busy = True
             try:
-                start = self.turret.pan_angle
-                self._set("SLOP TEST: REMEMBER A POINT IN FRAME — MOVING +5deg ...", AMBER)
+                # ที่ pan 138° การไป +5° เดิมถูก clamp ที่ 140° จึงอ่าน phantom backlash — เข้าด้านในก่อนแทน
+                direction = +1 if start + STEP_COARSE <= config.PAN_MAX else -1
+                if start - STEP_COARSE < config.PAN_MIN and direction < 0:
+                    raise RuntimeError("PAN RANGE TOO NARROW FOR A FULL SLOP EXCURSION")
+                sign = "+" if direction > 0 else "-"
+                self._set(f"SLOP TEST: REMEMBER A POINT IN FRAME - MOVING {sign}5deg ...", AMBER)
                 time.sleep(1.2)
-                self.turret.pan_by(+5)
+                self.turret.pan_by(direction * STEP_COARSE)
                 time.sleep(1.2)
-                self._set("SLOP TEST: MOVING BACK -5deg ...", AMBER)
-                self.turret.pan_by(-5)
+                self._set(f"SLOP TEST: MOVING BACK {('-' if direction > 0 else '+')}5deg ...", AMBER)
+                self.turret.pan_by(-direction * STEP_COARSE)
                 time.sleep(1.2)
                 back = self.turret.pan_angle
-                self._set(f"SLOP TEST DONE ({start:.0f} -> {back:.0f}deg) — "
+                self._set(f"SLOP TEST DONE ({start:.0f} -> {back:.0f}deg) - "
                           f"BACK TO SAME POINT? IF NOT = SLOP", GREEN)
+            except Exception as e:
+                # เดิม RuntimeError "ช่วง pan แคบเกิน" ถูกโยนใน thread ที่ไม่มี except
+                # → หายเงียบ ไม่มีอะไรขึ้นจอ คนกด b แล้วนึกว่าเครื่องไม่ตอบสนอง
+                self._set(f"SLOP TEST ABORTED: {e}", AMBER)
             finally:
+                # pan_to อาจ throw ได้ถ้าบอร์ดหลุด — ถ้าไม่กัน busy จะค้าง True ตลอดกาล
+                # แล้วทุกปุ่มยกเว้น g จะใช้ไม่ได้อีกเลยจนกว่าจะปิดโปรแกรม
+                try:
+                    self.turret.pan_to(start)
+                except Exception as e:
+                    self._hw_fault = True
+                    self._set(f"HARDWARE FAULT: {e}  //  RESTART REQUIRED", RED)
                 self.busy = False
 
-        threading.Thread(target=run, daemon=True).start()
+        self._slop_thread = threading.Thread(target=run, daemon=True)
+        self._slop_thread.start()
 
     def _print_values(self):
         ox, oy = config.SCOPE_ZERO_OFFSET_PX
@@ -227,8 +282,22 @@ class ManualAim:
                     break
         finally:
             self._alive = False
-            self.turret.close()
-            self.cap.release()
+            self._fire_cancel.set()
+            # timeout ผูกกับค่า config ไม่ใช่เลขตายตัว — FLYWHEEL_SPINUP_S ยังเป็น
+            # TODO ที่จะวัดจริงวันจูน ถ้าจูนขึ้นเกินเลขที่ hardcode ไว้ การปิดโปรแกรม
+            # จะไปปิดบอร์ดทั้งที่ thread ยิงยังทำงานอยู่ (สั่งมอเตอร์ผ่านบอร์ดที่ปิดแล้ว)
+            join_s = config.FLYWHEEL_SPINUP_S + config.FLYWHEEL_FEED_WINDOW_S + 1.0
+            for th in (self._fire_thread, self._slop_thread):
+                if th is not None:
+                    th.join(timeout=join_s)
+            try:
+                self.turret.close()
+            except Exception as e:
+                print(f"ปิดบอร์ดไม่สำเร็จ: {e}")
+            try:
+                self.cap.release()
+            except Exception as e:
+                print(f"ปิดกล้องไม่สำเร็จ: {e}")
             cv2.destroyAllWindows()
             print("ปิดบอร์ด + กล้องเรียบร้อย")
 
@@ -240,7 +309,7 @@ class ManualAim:
 
         # ระหว่างยิง/ทดสอบ slop ห้ามสั่งขยับซ้อน (จะเพี้ยนจนอ่านผลไม่ได้)
         if self.busy and ch not in ("g", "G"):
-            self._set("BUSY — WAIT (G = EMERGENCY STOP WHEELS)", AMBER)
+            self._set("BUSY - WAIT (G = EMERGENCY STOP WHEELS)", AMBER)
             return True
 
         if ch == "a":
@@ -268,8 +337,19 @@ class ManualAim:
         elif ch in ("f", "F"):
             self._fire()
         elif ch in ("g", "G"):
-            self.turret.spin_down()
-            self._set("WHEELS STOPPED", GREEN)
+            # ตั้ง cancel เสมอ ไม่ต้องเช็คว่า thread ยัง alive ไหม — จังหวะที่อันตราย
+            # ที่สุดคือตอน thread เพิ่งถูก start แต่ยังไม่ทันเข้า spin_up (ดู _fire)
+            self._fire_cancel.set()
+            try:
+                self.turret.spin_down()
+            except Exception as e:
+                self._hw_fault = True
+                self._set(f"HARDWARE FAULT: {e}  //  RESTART REQUIRED", RED)
+            else:
+                if fire_active:
+                    self._set("CANCELLED - WHEELS STOPPED", AMBER)
+                else:
+                    self._set("WHEELS STOPPED", GREEN)
         elif ch in ("y", "Y"):
             self.detect_on = not self.detect_on
             if not self.detect_on:
