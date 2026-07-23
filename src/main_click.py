@@ -189,14 +189,34 @@ class TacticalUI:
             self._set_status("LOCK A TARGET FIRST", RED)
             return
         self.op = "fire"
+        self._abort = False
         self._op_thread = threading.Thread(target=self._fire_sequence, daemon=True)
         self._op_thread.start()
 
     def _fire_sequence(self):
         try:
-            self._set_status("FIRING", RED)
-            self.turret.fire()
-            self._set_status("SHOT AWAY", GREEN)
+            # flywheel แยกเป็น 2 จังหวะเพื่อ "บอกคนป้อนลูก" ว่าล้อนิ่งเมื่อไหร่ —
+            # turret.fire() รวบทุกอย่างไว้ในคำสั่งเดียว จอจะค้างที่ FIRING ตลอด
+            # คนหย่อนไม่รู้จังหวะ หย่อนก่อนล้อนิ่ง = นัดนั้นเบากว่าเพื่อน จุดตกเพี้ยนจาก zero
+            # (โหมดสโคปตั้งอยู่บนสมมติฐานว่าทุกนัดแรงเท่ากัน — ดู hardware._fire_flywheel)
+            spin_up = getattr(self.turret, "spin_up", None)  # SimTurret ไม่มี → ตกไปทาง fire()
+            if config.LAUNCHER == "flywheel" and spin_up is not None:
+                self._set_status(
+                    f"SPINNING UP {config.FLYWHEEL_SPINUP_S:.1f}s  //  DO NOT DROP YET", AMBER)
+                spin_up()
+                end = time.time() + config.FLYWHEEL_FEED_WINDOW_S
+                while time.time() < end and not self._abort:
+                    self._set_status(
+                        f">>>  DROP THE BALL NOW  <<<   {end - time.time():3.1f}s LEFT", RED)
+                    time.sleep(0.05)
+                self.turret.spin_down()
+                self._set_status(
+                    "CANCELLED — WHEELS STOPPED" if self._abort
+                    else "WHEELS STOPPED  //  F FOR NEXT SHOT", GREEN)
+            else:
+                self._set_status("FIRING", RED)
+                self.turret.fire()
+                self._set_status("SHOT AWAY", GREEN)
         except Exception as e:
             self._set_status(f"ERROR: {e}", RED)
         finally:
