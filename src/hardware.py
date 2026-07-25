@@ -188,23 +188,29 @@ class Turret:
         เดิมลูป ramp อ่าน self._duty ทุกรอบ ถ้าอีก thread สั่งหยุดระหว่างไต่
         (กด g ฉุกเฉิน / ปิดโปรแกรม) ค่าจะถูกเซ็ตเป็น 0 แล้วลูปเดิม "ไต่กลับขึ้นไปต่อ"
         จนเต็มสปีด = ปุ่มหยุดฉุกเฉินใช้ไม่ได้จริง. แก้ด้วยเลขลำดับคำสั่ง: ทุกคำสั่งใหม่
-        เพิ่ม _duty_seq การไต่ที่ seq ไม่ใช่ตัวล่าสุดต้องเลิกทันที"""
+        เพิ่ม _duty_seq การไต่ที่ seq ไม่ใช่ตัวล่าสุดต้องเลิกทันที
+
+        ⚠ เช็ค seq กับเขียนค่า ต้องอยู่ใน lock เดียวกัน (25 ก.ค. — Codex เจอ):
+        เดิม _write_duty() อยู่ "นอก lock" ช่องว่างระหว่างปล่อย lock กับเขียนจริง
+        ทำให้ลำดับนี้เกิดได้ — ramp เช็ค seq ผ่าน → ปล่อย lock → spin_down() เขียน 0
+        → ramp เขียน duty เก่าทับ → รอบถัดไปเพิ่งเห็นว่า seq เปลี่ยนแล้ว return
+        ผลคือล้อยังหมุนอยู่หลังกดหยุดฉุกเฉิน (เศษที่เหลือจากรอบแก้ 23 ก.ค.)
+        _write_duty คุยกับ pyfirmata สั้นๆ ส่วน sleep ของ ramp อยู่นอก lock
+        การถือ lock ตอนเขียนจึงไม่หน่วงคำสั่งหยุดจน thread อื่นรอนาน"""
         duty = max(0.0, min(self._max_duty, duty))
         with self._duty_lock:
             self._duty_seq += 1
             seq = self._duty_seq
-            current = self._duty
-
-        if duty <= current:          # ขาลง/หยุด — สั่งทันที ไม่ไต่
-            self._write_duty(duty)
-            return
+            if duty <= self._duty:   # ขาลง/หยุด — สั่งทันที ไม่ไต่ (atomic กับการเพิ่ม seq)
+                self._write_duty(duty)
+                return
 
         while True:
             with self._duty_lock:
                 if seq != self._duty_seq:
                     return           # มีคำสั่งใหม่แทรก (มักคือ "หยุด") — ห้ามไต่ต่อ
                 nxt = min(self._duty + self._ramp_step, duty)
-            self._write_duty(nxt)
+                self._write_duty(nxt)
             if nxt >= duty:
                 return
             time.sleep(self._ramp_step_s)
