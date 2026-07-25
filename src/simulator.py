@@ -54,7 +54,16 @@ class SimWorld:
 
 class SimTurret:
     """แทน hardware.Turret — เมธอดครบเหมือนกันทุกตัว
-    มุมกล้อง/ลำกล้องเหนือระนาบ = tilt_angle - TILT_CENTER (เริ่มที่ระนาบพอดี)"""
+
+    ⚠ มุม servo กับทิศจริงของลำกล้อง "กลับด้านกัน" (25 ก.ค.) — เฟืองบนป้อมจริง
+    ต่อแบบมิเรอร์ทั้งสองแกน คาลิเบรตไว้ใน config เป็น AIM_SIGN/AIM_TILT_SIGN = -1
+    (24 ก.ค.) แต่ sim เดิมยังเป็นป้อมอุดมคติ "มุมเพิ่ม = ขวา/ขึ้น" → ลูปเล็งวิ่งหนีเป้า
+    ทั้งสองแกน smoke test ตกทั้ง 9 นัด
+
+    เลิกใช้ _pan/_tilt (มุม servo) คิดเรื่องทิศโดยตรง ให้ผ่าน yaw/pitch เสมอ:
+        servo pan เพิ่ม  → ลำกล้องหันซ้าย  (yaw ลด)
+        servo tilt เพิ่ม → ลำกล้องก้มลง    (pitch ลด, 180° = แนวระนาบ)
+    """
 
     def __init__(self, world: SimWorld):
         self.world = world
@@ -84,9 +93,14 @@ class SimTurret:
         self.tilt_to(self._tilt + delta_deg)
 
     @property
+    def yaw(self) -> float:
+        """ทิศจริงที่ลำกล้องชี้ (หน่วยเดียวกับ az ของเป้า) — มิเรอร์จากมุม servo"""
+        return 2 * config.PAN_CENTER - self._pan
+
+    @property
     def pitch(self) -> float:
-        """มุมลำกล้องเหนือระนาบ (องศา)"""
-        return self._tilt - config.TILT_CENTER
+        """มุมลำกล้องเหนือระนาบ (องศา) — มิเรอร์จากมุม servo เช่นกัน"""
+        return config.TILT_CENTER - self._tilt
 
     def fire(self):
         time.sleep(0.4)  # แทนเวลาดึง+ปล่อยเฟือง (ย่อให้เร็วกว่าจริง)
@@ -94,14 +108,14 @@ class SimTurret:
         # โหมดสโคป ยิงแรงคงที่วิถีแบน — โดน/พลาดตัดสินจาก error การเล็งล้วนๆ
         # เป้าที่ใกล้แนวเล็งที่สุดคือเป้าที่ลูกพุ่งไปหา
         label, t = min(self.world.targets.items(),
-                       key=lambda kv: abs(kv[1]["az"] - self._pan))
-        az_err = abs(t["az"] - self._pan)
+                       key=lambda kv: abs(kv[1]["az"] - self.yaw))
+        az_err = abs(t["az"] - self.yaw)
         el_err = abs(t["el"] - self.pitch)
 
         hit = az_err < 2.0 and el_err < 2.0   # เกณฑ์โดน: เล็งเพี้ยนไม่เกิน 2° ทั้งสองแกน
         self.shots += 1
         self.hits += hit
-        print(f"[SIM] pan={self._pan:.1f}° pitch={self.pitch:.1f}° | เป้า {label} "
+        print(f"[SIM] yaw={self.yaw:.1f}° pitch={self.pitch:.1f}° | เป้า {label} "
               f"@{t['dist']:.0f}mm: มุมเพี้ยน H {az_err:.1f}° V {el_err:.1f}° → "
               f"{'🎯 โดน!' if hit else '❌ พลาด'}  (สถิติ {self.hits}/{self.shots})")
 
@@ -133,7 +147,7 @@ class SimCamera:
         order = sorted(self.world.targets.items(), key=lambda kv: -kv[1]["dist"])
         for label, t in order:
             # แนวนอน: เป้าห่างจากแนวเล็งกี่องศา → กี่ pixel จากกลางภาพ
-            dx_px = (t["az"] - self.turret.pan_angle) * PX_PER_DEG
+            dx_px = (t["az"] - self.turret.yaw) * PX_PER_DEG
             cx = int(w / 2 + dx_px)
             # แนวตั้ง: เป้าสูงกว่าแนวลำกล้องกี่องศา → เหนือ/ใต้กลางภาพ
             dy_px = (t["el"] - pitch) * PX_PER_DEG
