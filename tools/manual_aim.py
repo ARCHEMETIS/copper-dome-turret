@@ -37,9 +37,21 @@ FONT = cv2.FONT_HERSHEY_DUPLEX
 STEP_FINE = 1.0    # a/d/w/s
 STEP_COARSE = 5.0  # A/D/W/S (กด shift)
 
-HELP = """
+# ทิศปุ่มขยับป้อม — ผูกกับทิศเฟืองจริงของตัวนี้ (ค่าเริ่มตรงกับ tools/test_hardware.py)
+# (คนละตัวกับ AIM_SIGN / AIM_TILT_SIGN ใน config.py ที่ใช้ตอนออโต้เล็ง)
+# ระหว่างรันสลับทิศสดได้เลยด้วย z (pan) / x (tilt) ไม่ต้องปิดโปรแกรม — พอถูกทางกด p
+# แล้วเอาเลขที่ขึ้นมาแทนสองบรรทัดล่างนี้ให้เป็นค่าถาวร
+KEY_PAN_SIGN = +1    # a → หันซ้าย, d → หันขวา   (ถ้ากลับข้างให้เป็น -1)
+KEY_TILT_SIGN = -1   # w → เงยขึ้น, s → กดลง      (ถ้ากลับข้างให้เป็น +1)
+
+# ปุ่มที่สั่ง pan(+) / tilt(-) จริง — เลื่อนตาม KEY_*_SIGN เอง ใช้ในบทเช็คทิศ HUD/HELP
+PAN_POS_KEY = "a" if KEY_PAN_SIGN > 0 else "d"
+TILT_NEG_KEY = "w" if KEY_TILT_SIGN < 0 else "s"
+
+HELP = f"""
   a / d      pan ซ้าย/ขวา 1°      |  A / D   ทีละ 5°
   w / s      tilt ขึ้น/ลง 1°       |  W / S   ทีละ 5°
+  z / x      สลับทิศ pan / tilt สดๆ — กดถ้ากดแล้วหันผิดข้าง (พอถูกทางกด p ไปแปะถาวร)
   c          กลับกลางลำ
   r          สั่ง config ขาใหม่ — ใช้ตอน "ตัวเลขเดินแต่ป้อมไม่ขยับ" (บอร์ดรีเซ็ตเพราะไฟตก)
   b          ทดสอบ slop: หมุน +5° แล้ว -5° กลับที่เดิม (ถ้าใกล้ลิมิตจะเข้าด้านในก่อน)
@@ -51,10 +63,10 @@ HELP = """
   q / ESC    ออก
 
   🔎 วิธีเช็คทิศ (ทำข้อนี้ก่อนอย่างอื่น):
-     กด d (pan +) แล้วดูวัตถุนิ่งๆ ในภาพ
+     กด {PAN_POS_KEY} (pan +) แล้วดูวัตถุนิ่งๆ ในภาพ
         ภาพเลื่อนไป "ซ้าย"  = AIM_SIGN = +1 ถูกแล้ว
         ภาพเลื่อนไป "ขวา"   = ต้องแก้ AIM_SIGN เป็น -1
-     กด s (tilt -) แล้วดูวัตถุเดิม
+     กด {TILT_NEG_KEY} (tilt -) แล้วดูวัตถุเดิม
         ภาพเลื่อน "ขึ้น"    = AIM_TILT_SIGN = +1 ถูกแล้ว
         ภาพเลื่อน "ลง"      = ต้องแก้ AIM_TILT_SIGN เป็น -1
 """
@@ -71,8 +83,12 @@ class ManualAim:
         print("พร้อม!", HELP)
 
         self.dets = []
-        self.status = "MANUAL MODE  //  a-d-w-s = MOVE   F = FIRE   Q = QUIT"
+        self.status = "MANUAL MODE  //  a-d-w-s = MOVE   Z/X = FLIP DIR   F = FIRE   Q = QUIT"
         self.status_color = GREEN
+        # ทิศเริ่มจากค่าคงที่ด้านบน แต่ "สลับสด" ได้ด้วย z (pan) / x (tilt) โดยไม่ต้องปิดโปรแกรม
+        # — ตัดวงจร "แก้ไฟล์→รันใหม่→เดา" ที่ทำให้ทิศวนไม่จบ พอหันถูกทางกด p เอาค่าไปแปะที่ KEY_*_SIGN
+        self.pan_sign = KEY_PAN_SIGN
+        self.tilt_sign = KEY_TILT_SIGN
         self.busy = False          # กำลังยิง/ทดสอบ slop อยู่ ห้ามสั่งซ้อน
         self._hw_fault = False     # บอร์ด throw ระหว่างยิง — ล็อกไม่ให้ยิงต่อจนกว่าจะ restart
         self._fire_cancel = threading.Event()  # g ต้องตัด feed window แม้ fire thread ยังอยู่
@@ -209,6 +225,8 @@ class ManualAim:
         print(f"  SCOPE_ZERO_OFFSET_PX = [{ox}, {oy}]   # copy ไปวางใน src/config.py")
         print(f"  AIM_SIGN = {config.AIM_SIGN}   AIM_TILT_SIGN = {config.AIM_TILT_SIGN}"
               f"   AIM_KP = {config.AIM_KP}")
+        print(f"  KEY_PAN_SIGN = {self.pan_sign:+d}   KEY_TILT_SIGN = {self.tilt_sign:+d}"
+              f"   # ทิศปุ่มที่หันถูกแล้ว — แปะแทนค่าเดิมหัวไฟล์ tools/manual_aim.py")
         print("=" * 58 + "\n")
         self._set("VALUES PRINTED TO CONSOLE (switch to the black window to copy)", AMBER)
 
@@ -242,10 +260,12 @@ class ManualAim:
         (tw, _), _ = cv2.getTextSize(right, FONT, 0.5, 1)
         cv2.putText(img, right, (w - tw - 18, 30), FONT, 0.5, GREEN, 1, cv2.LINE_AA)
 
-        # ตัวช่วยตั้งทิศ — ความสัมพันธ์นี้อ่านตรงจาก aiming.py (err = det - zero)
-        cv2.putText(img, "PRESS d -> IMAGE MUST SHIFT LEFT    PRESS s -> IMAGE MUST SHIFT UP",
+        # แถวบน = จูนแมนนวลสดด้วย z/x ; แถวล่าง = ช่วยตั้ง AIM_SIGN ของออโต้ (คีย์เลื่อนตามทิศสด)
+        pan_pos_key = "a" if self.pan_sign > 0 else "d"
+        tilt_neg_key = "w" if self.tilt_sign < 0 else "s"
+        cv2.putText(img, f"WRONG WAY?  [Z] flip a/d   [X] flip w/s      PAN {self.pan_sign:+d}   TILT {self.tilt_sign:+d}",
                     (18, h - 62), FONT, 0.5, AMBER, 1, cv2.LINE_AA)
-        cv2.putText(img, "(opposite = flip AIM_SIGN / AIM_TILT_SIGN to -1 in config.py)",
+        cv2.putText(img, f"AIM_SIGN calib: press {pan_pos_key} -> img shift LEFT,  press {tilt_neg_key} -> img shift UP",
                     (18, h - 44), FONT, 0.45, GREEN_DIM, 1, cv2.LINE_AA)
         cv2.line(img, (14, h - 34), (w - 14, h - 34), GREEN_DIM, 1)
         cv2.putText(img, self.status, (18, h - 12), FONT, 0.55,
@@ -313,22 +333,33 @@ class ManualAim:
             self._set("BUSY - WAIT (G = EMERGENCY STOP WHEELS)", AMBER)
             return True
 
+        # ทิศคุมจาก self.pan_sign / self.tilt_sign — สลับสดด้วย z / x (เริ่มจาก KEY_*_SIGN)
         if ch == "a":
-            self.turret.pan_by(-STEP_FINE)
+            self.turret.pan_by(self.pan_sign * STEP_FINE)
         elif ch == "d":
-            self.turret.pan_by(+STEP_FINE)
+            self.turret.pan_by(-self.pan_sign * STEP_FINE)
         elif ch == "A":
-            self.turret.pan_by(-STEP_COARSE)
+            self.turret.pan_by(self.pan_sign * STEP_COARSE)
         elif ch == "D":
-            self.turret.pan_by(+STEP_COARSE)
+            self.turret.pan_by(-self.pan_sign * STEP_COARSE)
         elif ch == "w":
-            self.turret.tilt_by(+STEP_FINE)
+            self.turret.tilt_by(self.tilt_sign * STEP_FINE)
         elif ch == "s":
-            self.turret.tilt_by(-STEP_FINE)
+            self.turret.tilt_by(-self.tilt_sign * STEP_FINE)
         elif ch == "W":
-            self.turret.tilt_by(+STEP_COARSE)
+            self.turret.tilt_by(self.tilt_sign * STEP_COARSE)
         elif ch == "S":
-            self.turret.tilt_by(-STEP_COARSE)
+            self.turret.tilt_by(-self.tilt_sign * STEP_COARSE)
+        elif ch in ("z", "Z"):
+            # สลับทิศ pan สดๆ — กดถ้า a/d หันผิดข้าง เห็นผลทันทีไม่ต้องรันใหม่
+            self.pan_sign = -self.pan_sign
+            self._set(f"PAN FLIPPED  //  now KEY_PAN_SIGN = {self.pan_sign:+d}  (test a/d again)", AMBER)
+            print(f"สลับทิศ pan → KEY_PAN_SIGN = {self.pan_sign:+d}  (a/d กลับข้างแล้ว)")
+        elif ch in ("x", "X"):
+            # สลับทิศ tilt สดๆ — กดถ้า w/s หันผิดข้าง
+            self.tilt_sign = -self.tilt_sign
+            self._set(f"TILT FLIPPED  //  now KEY_TILT_SIGN = {self.tilt_sign:+d}  (test w/s again)", AMBER)
+            print(f"สลับทิศ tilt → KEY_TILT_SIGN = {self.tilt_sign:+d}  (w/s กลับข้างแล้ว)")
         elif ch in ("c", "C"):
             self.turret.center()
             self._set("CENTERED", GREEN)
@@ -347,6 +378,8 @@ class ManualAim:
         elif ch in ("g", "G"):
             # ตั้ง cancel เสมอ ไม่ต้องเช็คว่า thread ยัง alive ไหม — จังหวะที่อันตราย
             # ที่สุดคือตอน thread เพิ่งถูก start แต่ยังไม่ทันเข้า spin_up (ดู _fire)
+            # อ่านสถานะยิง "ก่อน" สั่ง cancel — ไว้เลือกข้อความ (เดิมอ้าง fire_active ที่ไม่มีตัวแปร → NameError)
+            fire_active = self._fire_thread is not None and self._fire_thread.is_alive()
             self._fire_cancel.set()
             try:
                 self.turret.spin_down()

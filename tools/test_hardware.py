@@ -22,6 +22,7 @@ COMMON_HELP = """
   A / D        หมุนป้อมซ้าย / ขวา ทีละ 20°
   w / s        มุมเงยขึ้น / ลง ทีละ 5°
   c            กลับ center (pan + tilt)
+  [ / ]        สลับทิศ pan / tilt สดๆ — กดถ้ากดแล้วป้อมหันผิดข้าง (จดเลขที่ขึ้นไปแปะถาวร)
   r            สั่ง config ขาใหม่ — ใช้ตอน "ตัวเลขเดินแต่ป้อมไม่ขยับ" (บอร์ดรีเซ็ตเพราะไฟตก)
   t            ยิง 1 นัด (โหมดสโคปยิงแรงคงที่ — เล็งด้วย pan/tilt ไม่ใช่ความแรง)
   q            ออก"""
@@ -48,6 +49,9 @@ def main():
     print("กำลังต่อ Arduino ...")
     turret = hardware.Turret()
     print("ต่อสำเร็จ!", HELP)
+    # ทิศปุ่ม — ผูกกับทิศเฟืองจริง สลับสดด้วย [ (pan) / ] (tilt) ถ้ากดแล้วป้อมหันผิดข้าง
+    # ค่าเริ่ม: pan_sign=+1 → a=ซ้าย d=ขวา ; tilt_sign=-1 → w=ขึ้น s=ลง (จากทดสอบจริง)
+    pan_sign, tilt_sign = +1, -1
     try:
         while True:
             print(f"\r[pan={turret.pan_angle:.0f}° tilt={turret.tilt_angle:.0f}°] > ",
@@ -57,17 +61,23 @@ def main():
                 print()
                 break
             elif cmd == "a":
-                turret.pan_by(-5)
+                turret.pan_by(pan_sign * 5)
             elif cmd == "d":
-                turret.pan_by(+5)
+                turret.pan_by(-pan_sign * 5)
             elif cmd == "A":
-                turret.pan_by(-20)
+                turret.pan_by(pan_sign * 20)
             elif cmd == "D":
-                turret.pan_by(+20)
+                turret.pan_by(-pan_sign * 20)
             elif cmd == "w":
-                turret.tilt_by(+5)
+                turret.tilt_by(tilt_sign * 5)
             elif cmd == "s":
-                turret.tilt_by(-5)
+                turret.tilt_by(-tilt_sign * 5)
+            elif cmd == "[":
+                pan_sign = -pan_sign
+                print(f"\nสลับทิศ pan → แก้ในโค้ดหัวไฟล์เป็น pan_sign = {pan_sign:+d}  (ลองกด a/d ใหม่)")
+            elif cmd == "]":
+                tilt_sign = -tilt_sign
+                print(f"\nสลับทิศ tilt → แก้ในโค้ดหัวไฟล์เป็น tilt_sign = {tilt_sign:+d}  (ลองกด w/s ใหม่)")
             elif cmd == "c":
                 turret.center()
             elif cmd == "r":
