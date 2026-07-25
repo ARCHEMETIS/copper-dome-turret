@@ -102,6 +102,11 @@ class SimTurret:
         """มุมลำกล้องเหนือระนาบ (องศา) — มิเรอร์จากมุม servo เช่นกัน"""
         return config.TILT_CENTER - self._tilt
 
+    def center(self):
+        """คืนกลางลำ — มีใน hardware.Turret ต้องมีที่นี่ด้วย (main_click ปุ่ม c เรียก)"""
+        self.pan_to(config.PAN_CENTER)
+        self.tilt_to(config.TILT_CENTER)
+
     def fire(self):
         time.sleep(0.4)  # แทนเวลาดึง+ปล่อยเฟือง (ย่อให้เร็วกว่าจริง)
 

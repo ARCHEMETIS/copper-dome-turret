@@ -45,6 +45,7 @@ class _NullTurret:
     def pan_by(self, delta): pass
     def tilt_to(self, angle): pass
     def tilt_by(self, delta): pass
+    def center(self): pass          # ปุ่ม c เรียกเมธอดนี้ — ไม่มี = AttributeError จอดับ
     def fire(self): pass
     def close(self): pass
 
