@@ -91,6 +91,7 @@ class YoloDetector:
         self.device = 0 if torch.cuda.is_available() else "cpu"
         self.model.to(self.device)
         self._persist = {}   # label -> ตัวนับสะสมการเห็นเป้า
+        self._last_box = {}  # label -> (cx, cy, w, h) ของกรอบที่นับไว้เฟรมก่อน
 
         # warmup จริง (23 ก.ค.) — คอมเมนต์ข้างบนอ้างมาตลอดว่ามี แต่โค้ดไม่เคยมี
         # ต้องอุ่น "ทั้งสองขนาด" เพราะระบบใช้คนละ imgsz กัน (จอ 512 / เล็ง 640)
@@ -141,8 +142,21 @@ class YoloDetector:
         session ถัดไปเฟรมแรก True เลย)"""
         if target is None:
             self._persist.clear()
+            self._last_box.clear()
         else:
             self._persist.pop(target, None)
+            self._last_box.pop(target, None)
+
+    @staticmethod
+    def _same_object(prev, det) -> bool:
+        """กรอบใหม่เป็น "ของชิ้นเดิม" กับที่นับไว้เฟรมก่อนไหม — วัดจากระยะจุดกึ่งกลาง
+
+        เผื่อไว้กว้างโดยตั้งใจ เพราะระหว่างสองเฟรมป้อมหมุนได้ถึง AIM_MAX_STEP_DEG
+        และกล้องติดอยู่บนลำกล้อง = เป้าจริงเลื่อนทั้งเฟรมตามไปด้วย ประตูนี้มีไว้
+        ตัดผีที่ "กระโดดข้ามจอ" ไม่ใช่ไว้ track แบบละเอียด"""
+        pcx, pcy, pw, ph = prev
+        allow = max(config.GATE_JUMP_FRAC * max(pw, ph), config.GATE_JUMP_MIN_PX)
+        return ((det.cx - pcx) ** 2 + (det.cy - pcy) ** 2) ** 0.5 <= allow
 
     def detect(self, frame_bgr, target: str) -> Detection | None:
         want = config.TARGETS[target]["yolo_class"]
@@ -164,9 +178,20 @@ class YoloDetector:
             if best is None or conf > best.conf:
                 best = Detection(target, (x1 + x2) / 2, (y1 + y2) / 2, w, h, conf)
 
-        # ชั้นเวลา — นับสะสมต่อ label แล้วปล่อยเมื่อถึงเกณฑ์
+        # ชั้นเวลา+ตำแหน่ง — นับสะสมเฉพาะตอนที่เป็น "ของชิ้นเดิม" ติดกัน
+        # (เดิมนับแค่ label: ผีคนละตัวคนละมุมจอ 3 เฟรมก็ครบเกณฑ์ได้ ดู GATE_JUMP_* ใน config)
         n = self._persist.get(target, 0)
-        n = min(n + 1, config.GATE_PERSIST_FRAMES) if best is not None else max(n - 1, 0)
+        if best is None:
+            n = max(n - 1, 0)
+            if n == 0:
+                self._last_box.pop(target, None)
+        else:
+            prev = self._last_box.get(target)
+            if prev is None or self._same_object(prev, best):
+                n = min(n + 1, config.GATE_PERSIST_FRAMES)
+            else:
+                n = 1   # คนละชิ้นกับที่นับอยู่ — เริ่มนับใหม่จากกรอบนี้ ไม่ใช่สะสมต่อ
+            self._last_box[target] = (best.cx, best.cy, best.w_px, best.h_px)
         self._persist[target] = n
         if best is not None and n < config.GATE_PERSIST_FRAMES:
             return None  # ยังไม่มั่นใจว่าไม่ใช่ ghost วูบเดียว
