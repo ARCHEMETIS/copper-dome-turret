@@ -13,11 +13,15 @@ Single-context layout — one `CONTEXT.md` + `docs/adr/` at the repo root. See `
 ## Codex orchestration
 
 Claude is the lead agent for this repository. When a task benefits from delegation,
-Claude may assign a concrete, self-contained subtask to Codex with:
+Claude may assign a concrete, self-contained subtask to Codex via the `codex` subagent.
 
-```powershell
-codex exec --full-auto "<task prompt>"
-```
+**`.claude/agents/codex.md` is the single source of truth for invocation mechanics** —
+binary path, sandbox flag, prompt-on-stdin, flag ordering. Do not repeat or improvise a
+command line here; on this machine the shortcuts that look reasonable are the ones that
+fail silently. (It is per-machine and gitignored, so a fresh clone will not have it —
+re-establish the mechanics before delegating rather than guessing a command line.)
+
+Codex reads `AGENTS.md`, not this file — project guardrails Codex must obey belong there.
 
 When delegating to Codex:
 
