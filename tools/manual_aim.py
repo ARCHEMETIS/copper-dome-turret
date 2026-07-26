@@ -34,15 +34,13 @@ AMBER = (0, 200, 255)
 RED = (60, 60, 255)
 FONT = cv2.FONT_HERSHEY_DUPLEX
 
-STEP_FINE = 1.0    # a/d/w/s
-STEP_COARSE = 5.0  # A/D/W/S (กด shift)
-
-# ทิศปุ่มขยับป้อม — ผูกกับทิศเฟืองจริงของตัวนี้ (ค่าเริ่มตรงกับ tools/test_hardware.py)
-# (คนละตัวกับ AIM_SIGN / AIM_TILT_SIGN ใน config.py ที่ใช้ตอนออโต้เล็ง)
-# ระหว่างรันสลับทิศสดได้เลยด้วย z (pan) / x (tilt) ไม่ต้องปิดโปรแกรม — พอถูกทางกด p
-# แล้วเอาเลขที่ขึ้นมาแทนสองบรรทัดล่างนี้ให้เป็นค่าถาวร
-KEY_PAN_SIGN = +1    # a → หันซ้าย, d → หันขวา   (ถ้ากลับข้างให้เป็น -1)
-KEY_TILT_SIGN = -1   # w → เงยขึ้น, s → กดลง      (ถ้ากลับข้างให้เป็น +1)
+# ค่าทั้งสี่ย้ายไป config.py แล้ว (25 ก.ค.) — main_click.py ใช้ชุดเดียวกัน
+# เก็บสองแหล่งไว้เท่ากับรอให้มันเพี้ยนกัน เหมือนที่ simulator เพิ่งเพี้ยนจาก AIM_*_SIGN
+# ระหว่างรันสลับทิศสดได้ด้วย z (pan) / x (tilt) — พอถูกทางกด p แล้วจดกลับไปแก้ config.py
+STEP_FINE = config.KEY_STEP_FINE_DEG      # a/d/w/s
+STEP_COARSE = config.KEY_STEP_COARSE_DEG  # A/D/W/S (กด shift)
+KEY_PAN_SIGN = config.KEY_PAN_SIGN        # a → หันซ้าย, d → หันขวา
+KEY_TILT_SIGN = config.KEY_TILT_SIGN      # w → เงยขึ้น, s → กดลง
 
 # ปุ่มที่สั่ง pan(+) / tilt(-) จริง — เลื่อนตาม KEY_*_SIGN เอง ใช้ในบทเช็คทิศ HUD/HELP
 PAN_POS_KEY = "a" if KEY_PAN_SIGN > 0 else "d"

@@ -14,7 +14,9 @@
 #
 # ปุ่ม:  คลิกซ้ายที่ตุ๊กตา = ล็อก+หันตาม | คลิกซ้ายที่ว่าง = เล็งจุดนั้น(สำรอง)
 #        คลิกขวา = ยกเลิก/หยุดล็อก | I/J/K/L = เลื่อนจุด zero (ตอนคาลิเบรตสโคป)
-#        C = คืนป้อมกลางลำ | F = ยิง | Q หรือ ESC = ออก
+#        W/A/S/D = ขยับป้อมเอง (ตัวใหญ่ = ก้าวหยาบ) | C = คืนป้อมกลางลำ
+#        E = ปั่นล้อค้าง (ยิงรัวไม่ต้องเร่งใหม่ทุกนัด) | G = หยุดล้อฉุกเฉิน
+#        F = ยิง | Q หรือ ESC = ออก
 # =============================================================
 import math
 import sys
@@ -97,6 +99,8 @@ class TacticalUI:
         self._fps = 0.0
         self._cam_fail = 0           # นับเฟรมที่อ่านกล้องไม่ได้ติดกัน (ดูลูปหลัก)
         self._hw_fault = False       # เจอ error ฝั่งฮาร์ดแวร์แล้ว — ห้ามยิงต่อจนกว่าจะรีสตาร์ท
+        self.spin_hold = False       # ล้อ flywheel ถูกสั่งค้างไว้ด้วยปุ่ม E (ไม่ใช่ค้างจากนัดที่กำลังยิง)
+        self._spin_thread = None     # spin_up() บล็อก FLYWHEEL_SPINUP_S — ห้ามรันบน thread จอ
 
         if list(config.SCOPE_ZERO_OFFSET_PX) == [0, 0]:
             # ไม่บล็อกการยิง — ต้องยิงถึงจะคาลิเบรตได้ แต่ต้องเห็นชัดว่ายังไม่ได้ตั้ง
@@ -205,6 +209,101 @@ class TacticalUI:
     def _announce_armed(self, what):
         self._set_status(f">> LOCKED: {what} // ON ZERO // F TO FIRE <<", RED)
 
+    # ---------- ขยับป้อมเอง (W/A/S/D) ----------
+    def _manual_move(self, dpan_steps, dtilt_steps, coarse):
+        """ขยับป้อมทีละก้าว — ทิศ/ขนาดก้าวมาจาก config.KEY_* ชุดเดียวกับ manual_aim
+
+        ห้ามขยับตอน op != None: ลูปเล็งอัตโนมัติกำลังคุมป้อมอยู่ ถ้าแทรกเข้าไป
+        ป้อมจะสู้กันเอง แล้ว error ที่ลูปกำลังไล่ปิดจะเพี้ยนโดยหาสาเหตุไม่เจอ
+        (ปุ่ม c ก็กันด้วยเงื่อนไขเดียวกัน) — คลิกขวายกเลิกก่อนถึงจะขยับเองได้"""
+        if self.op is not None:
+            self._set_status("BUSY  //  RIGHT-CLICK TO CANCEL FIRST", AMBER)
+            return
+        if self._hw_fault:
+            self._set_status("HARDWARE FAULT LATCHED  //  RESTART REQUIRED", RED)
+            return
+        step = config.KEY_STEP_COARSE_DEG if coarse else config.KEY_STEP_FINE_DEG
+        try:
+            if dpan_steps:
+                self.turret.pan_by(config.KEY_PAN_SIGN * dpan_steps * step)
+            if dtilt_steps:
+                self.turret.tilt_by(config.KEY_TILT_SIGN * dtilt_steps * step)
+        except Exception as e:
+            self._hw_fault = True
+            self._set_status(f"HARDWARE FAULT: {e}  //  RESTART REQUIRED", RED)
+            return
+        # ขยับเองแล้ว = จุดที่เคยล็อกไว้ไม่ตรงอีกต่อไป ต้องล้างสถานะพร้อมยิงทิ้ง
+        # ไม่งั้นจอยังขึ้น LOCKED ทั้งที่ลำกล้องหันไปทางอื่นแล้ว = ยิงพลาดโดยเชื่อจอ
+        self.armed = False
+        self.locked_label = None
+        self._set_status(
+            f"MANUAL  PAN {self.turret.pan_angle:.1f}  TILT {self.turret.tilt_angle:.1f}"
+            f"  //  CLICK A TOY TO LOCK", GREEN)
+
+    # ---------- ปั่นล้อค้าง (E) / หยุดฉุกเฉิน (G) ----------
+    def toggle_spin_hold(self):
+        """สั่งล้อ flywheel ค้างความเร็วไว้ ไม่ต้องเร่งใหม่ทุกนัด
+
+        hardware.spin_up() ออกแบบมาให้ UI สั่งค้างเองได้อยู่แล้ว (ดู docstring ที่นั่น)
+        แต่มันบล็อก FLYWHEEL_SPINUP_S — เรียกบน thread จอตรงๆ = จอค้าง 1.5 วิ
+        จึงโยนลง thread แล้วให้จอเดินต่อระหว่างเร่ง"""
+        if not self.can_fire:
+            self._set_status("TEST MODE  //  NO TURRET", AMBER)
+            return
+        if self._hw_fault:
+            self._set_status("HARDWARE FAULT LATCHED  //  RESTART REQUIRED", RED)
+            return
+        if config.LAUNCHER != "flywheel":
+            self._set_status(f"LAUNCHER IS {config.LAUNCHER.upper()}  //  NO WHEELS", AMBER)
+            return
+        if getattr(self.turret, "spin_up", None) is None:
+            self._set_status("NO FLYWHEEL ON THIS TURRET", AMBER)
+            return
+        if self.spin_hold:
+            self.stop_wheels(reason="WHEELS STOPPED")
+            return
+        if self._spin_thread is not None and self._spin_thread.is_alive():
+            return                     # กำลังเร่งอยู่ กด E รัวไม่ต้องซ้อน
+        if self.op is not None:
+            self._set_status("BUSY  //  WAIT FOR CURRENT SHOT", AMBER)
+            return
+
+        self.spin_hold = True          # ตั้งก่อนเร่ง เพื่อให้ G ที่กดระหว่างเร่งยกเลิกได้
+        self._set_status(
+            f"SPINNING UP {config.FLYWHEEL_SPINUP_S:.1f}s  //  KEEP HANDS CLEAR", RED)
+
+        def _spin():
+            try:
+                self.turret.spin_up()
+            except Exception as e:
+                self.spin_hold = False
+                self._hw_fault = True
+                self._set_status(f"HARDWARE FAULT: {e}  //  RESTART REQUIRED", RED)
+                return
+            if self.spin_hold:         # ยังไม่ถูกสั่งหยุดระหว่างเร่ง
+                self._set_status("WHEELS HOLDING  //  F TO FIRE  //  E OR G TO STOP", RED)
+            else:
+                # กด G ระหว่างเร่ง — spin_down() ตอนนั้นสั่งไปก่อนที่ spin_up จะจบ
+                # ต้องสั่งซ้ำ ไม่งั้นล้อค้างหมุนต่อ (เคสเดียวกับที่ manual_aim เตือนไว้)
+                self.stop_wheels(reason="CANCELLED  //  WHEELS STOPPED")
+
+        self._spin_thread = threading.Thread(target=_spin, daemon=True)
+        self._spin_thread.start()
+
+    def stop_wheels(self, reason="WHEELS STOPPED"):
+        """หยุดล้อทันที — ปุ่ม G ใช้ได้ตลอดเวลา แม้กำลังยิง/กำลังเร่ง"""
+        self.spin_hold = False
+        spin_down = getattr(self.turret, "spin_down", None)
+        if spin_down is None:
+            return
+        try:
+            spin_down()
+        except Exception as e:
+            self._hw_fault = True
+            self._set_status(f"HARDWARE FAULT: {e}  //  RESTART REQUIRED", RED)
+        else:
+            self._set_status(reason, GREEN)
+
     # ---------- ยิง ----------
     def start_fire(self):
         if self.op is not None:
@@ -231,17 +330,23 @@ class TacticalUI:
             # (โหมดสโคปตั้งอยู่บนสมมติฐานว่าทุกนัดแรงเท่ากัน — ดู hardware._fire_flywheel)
             spin_up = getattr(self.turret, "spin_up", None)  # SimTurret ไม่มี → ตกไปทาง fire()
             if config.LAUNCHER == "flywheel" and spin_up is not None:
-                self._set_status(
-                    f"SPINNING UP {config.FLYWHEEL_SPINUP_S:.1f}s  //  DO NOT DROP YET", AMBER)
-                spin_up()
+                # ล้อค้างอยู่แล้วจากปุ่ม E = ข้ามขาเร่ง เปิดหน้าต่างหย่อนลูกเลย
+                # (นี่คือเหตุผลที่ hardware แยก spin_up/spin_down ออกมาให้ UI สั่งเอง)
+                if not self.spin_hold:
+                    self._set_status(
+                        f"SPINNING UP {config.FLYWHEEL_SPINUP_S:.1f}s  //  DO NOT DROP YET", AMBER)
+                    spin_up()
                 end = time.time() + config.FLYWHEEL_FEED_WINDOW_S
                 while time.time() < end and not self._abort:
                     self._set_status(
                         f">>>  DROP THE BALL NOW  <<<   {end - time.time():3.1f}s LEFT", RED)
                     time.sleep(0.05)
-                self._set_status(
-                    "CANCELLED — WHEELS STOPPED" if self._abort
-                    else "WHEELS STOPPED  //  F FOR NEXT SHOT", GREEN)
+                if self._abort:
+                    self._set_status("CANCELLED  //  WHEELS STOPPED", GREEN)
+                elif self.spin_hold:
+                    self._set_status("WHEELS STILL HOLDING  //  F FOR NEXT SHOT", RED)
+                else:
+                    self._set_status("WHEELS STOPPED  //  F FOR NEXT SHOT", GREEN)
             else:
                 self._set_status("FIRING", RED)
                 self.turret.fire()
@@ -256,12 +361,19 @@ class TacticalUI:
             # ⚠ หยุดล้อใน finally เสมอ — ถ้า throw ระหว่าง spin_up/หน้าต่างหย่อนลูก
             # โค้ดเดิมข้าม spin_down() ไปเลย = ล้อหมุนเต็มสปีดค้างไว้ โดยมีมือคน
             # อยู่ตรงช่องหย่อนลูกพอดี (บั๊กที่เขียนเองเมื่อเช้า 23 ก.ค.)
-            try:
-                spin_down = getattr(self.turret, "spin_down", None)
-                if spin_down is not None:
-                    spin_down()
-            except Exception:
-                pass      # พยายามหยุดแบบ best-effort — error จริงรายงานไปแล้วข้างบน
+            #
+            # ยกเว้นเดียว: คนสั่งค้างล้อไว้เองด้วยปุ่ม E และนัดนี้จบดี — ตั้งใจให้หมุนต่อ
+            # ถ้ามี error หรือถูกยกเลิก ยังหยุดเหมือนเดิม (ล้างธง hold ทิ้งด้วย)
+            # เพราะตอนนั้นเราไม่รู้แล้วว่าล้ออยู่ในสภาพไหน
+            keep_spinning = self.spin_hold and not self._hw_fault and not self._abort
+            if not keep_spinning:
+                self.spin_hold = False
+                try:
+                    spin_down = getattr(self.turret, "spin_down", None)
+                    if spin_down is not None:
+                        spin_down()
+                except Exception:
+                    pass  # พยายามหยุดแบบ best-effort — error จริงรายงานไปแล้วข้างบน
             self.op = None
 
     # ---------- เลื่อนจุด zero (ตอนคาลิเบรตสโคป — ยิงจริงแล้วขยับจุดให้ทับรอยโดน) ----------
@@ -342,6 +454,13 @@ class TacticalUI:
                  f"   TILT {self.turret.tilt_angle:5.1f}   {self._fps:4.1f} FPS")
         (tw, _), _ = cv2.getTextSize(right, FONT, 0.55, 1)
         cv2.putText(img, right, (w - m - tw - 8, 32), FONT, 0.55, GREEN, 1, cv2.LINE_AA)
+
+        # ล้อหมุนค้างอยู่ = อันตรายกับมือที่รางป้อนลูก ต้องเห็นตลอดเวลา ไม่ใช่แค่
+        # ตอน status บรรทัดล่างบังเอิญพูดถึง (status ถูกทับด้วยข้อความอื่นได้ตลอด)
+        if self.spin_hold:
+            warn = "!! WHEELS SPINNING !!" if blink else "   WHEELS SPINNING   "
+            (ww, _), _ = cv2.getTextSize(warn, FONT, 0.7, 2)
+            cv2.putText(img, warn, ((w - ww) // 2, 68), FONT, 0.7, RED, 2, cv2.LINE_AA)
 
         cv2.line(img, (m, h - 46), (w - m, h - 46), GREEN_DIM, 1)
         cv2.putText(img, self.status, (m + 8, h - 20),
@@ -487,6 +606,23 @@ class TacticalUI:
                     self.armed = False
                     self.locked_label = None
                     self._set_status("TURRET CENTERED", GREEN)
+                # ---- ขยับป้อมเอง: ตัวเล็ก = ก้าวละเอียด, ตัวใหญ่ (shift) = ก้าวหยาบ ----
+                elif k in (ord('a'), ord('A')):
+                    self._manual_move(+1, 0, coarse=k == ord('A'))
+                elif k in (ord('d'), ord('D')):
+                    self._manual_move(-1, 0, coarse=k == ord('D'))
+                elif k in (ord('w'), ord('W')):
+                    self._manual_move(0, +1, coarse=k == ord('W'))
+                elif k in (ord('s'), ord('S')):
+                    self._manual_move(0, -1, coarse=k == ord('S'))
+                # ---- ล้อ flywheel ----
+                elif k in (ord('e'), ord('E')):
+                    self.toggle_spin_hold()
+                elif k in (ord('g'), ord('G')):
+                    # หยุดฉุกเฉิน — ต้องกดได้ทุกสถานะ รวมถึงตอนกำลังยิง/กำลังเร่ง
+                    # _abort ทำให้หน้าต่างหย่อนลูกที่ค้างอยู่เลิกทันทีด้วย
+                    self._abort = True
+                    self.stop_wheels(reason="EMERGENCY STOP  //  WHEELS STOPPED")
                 if cv2.getWindowProperty(win, cv2.WND_PROP_VISIBLE) < 1:
                     break
         finally:
