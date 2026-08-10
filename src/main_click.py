@@ -11,6 +11,10 @@
 #
 # รันกับของจริง:  venv\Scripts\python.exe src\main_click.py
 # รันโหมดจำลอง:   venv\Scripts\python.exe src\main_click.py --sim
+# ดูจอบูตเฉยๆ:    venv\Scripts\python.exe src\main_click.py --boot-demo
+#
+# ตอนเปิด: bootstrap() เปิดอุปกรณ์ทีละขั้นโดยมีจอบูต (bootscreen.py) รายงานสด
+# กล้อง+Arduino ถูกสั่งเปิดขนานไปกับการโหลดโมเดล → รวมเวลาเหลือ ~ขาที่ช้าที่สุด
 #
 # ปุ่ม:  คลิกซ้ายที่ตุ๊กตา = ล็อก+หันตาม | คลิกซ้ายที่ว่าง = เล็งจุดนั้น(สำรอง)
 #        คลิกขวา = ยกเลิก/หยุดล็อก | I/J/K/L = เลื่อนจุด zero (ตอนคาลิเบรตสโคป)
@@ -26,6 +30,7 @@ import time
 import cv2
 
 import aiming
+import bootscreen
 import config
 import detector as detector_mod
 
@@ -53,31 +58,22 @@ class _NullTurret:
 
 
 class TacticalUI:
-    def __init__(self):
-        if "--sim" in sys.argv:
-            import simulator
-            self.cap, self.turret = simulator.create_sim()
-            self.detector = detector_mod.HsvDetector()  # sim วาดเป็นสีทึบ YOLO มองไม่ออก
-            self.mode = "SIM"
-            self.can_fire = True
-        elif "--webcam" in sys.argv:
-            import camera
-            self.cap = camera.open_camera()
-            self.turret = _NullTurret()
-            self.detector = detector_mod.get_detector()
-            self.mode = "TEST"
-            self.can_fire = False
-        else:
-            import camera
-            import hardware
-            self.cap = camera.open_camera()
-            self.turret = hardware.Turret()
-            self.detector = detector_mod.get_detector()
-            self.mode = "LIVE"
-            self.can_fire = True
+    def __init__(self, cap, turret, detector, mode, can_fire):
+        # อุปกรณ์ทุกชิ้นถูกเปิดมาแล้วจากข้างนอก (ดู bootstrap()) — เดิม __init__
+        # เป็นคนเปิดเอง ซึ่งแปลว่าระหว่างรอ 15-25 วิ ไม่มีทางเอาสถานะขึ้นจอได้เลย
+        # เพราะยังไม่มีอะไรให้วาด
+        self.cap = cap
+        self.turret = turret
+        self.detector = detector
+        self.mode = mode
+        self.can_fire = can_fire
 
         self.op = None               # None | "lock" (ป้อมกำลังหันตามตุ๊กตา) | "fire"
         self.locked_label = None     # ชนิดตุ๊กตาที่ล็อก (None = ล็อกแบบพิกเซล/ยังไม่ล็อก)
+        self._anchor = None          # (cx, cy) ของ "ตัวที่คลิก" — ตัวชี้ขาดว่าล็อกตัวไหน
+                                     # เมื่อชนิดเดียวกันโผล่หลายกรอบ (ไม่ต้องล้างตอน
+                                     # ปลดล็อก: ใช้เมื่อ locked_label ไม่ None เท่านั้น
+                                     # และ _start_lock เขียนทับให้ใหม่ทุกครั้ง)
         self.armed = False           # เล็งเสร็จ พร้อมยิง (โชว์เป้าเล็งแดง)
         self.mouse = (0, 0)
         self.dets = []               # detection ล่าสุด (worker เขียน, main อ่าน/วาด)
@@ -123,7 +119,7 @@ class TacticalUI:
         if event == cv2.EVENT_LBUTTONDOWN:
             toy = self._toy_under(x, y)
             if toy is not None:
-                self._start_lock(toy.label)        # คลิกโดนตุ๊กตา → ล็อก+หันตาม
+                self._start_lock(toy)              # คลิกโดนตุ๊กตา → ล็อก+หันตาม
             else:
                 self._aim_manual(x, y)             # คลิกที่ว่าง → เล็งพิกเซล (สำรอง)
 
@@ -139,16 +135,23 @@ class TacticalUI:
         return min(near, key=lambda d: (x - d.cx) ** 2 + (y - d.cy) ** 2) if near else None
 
     # ---------- ล็อกตุ๊กตา → ป้อมหันตาม (visual servoing) ----------
-    def _start_lock(self, label):
+    def _start_lock(self, toy):
+        """toy = Detection ที่คนคลิกโดน — ต้องส่ง "ตัวไหน" ไปด้วย ไม่ใช่แค่ "ชนิดอะไร"
+
+        เดิมส่งแค่ toy.label แล้วลูปเล็งไปหาเองว่ากรอบชนิดนั้นที่ conf สูงสุดอยู่ไหน
+        พอโมเดลอ่านช้างเป็น capybara ด้วย conf สูงกว่าตัวจริง ป้อมจึงหันไปหาช้าง
+        ทั้งที่คนคลิกคาปิบาร่า (เจอจริง 29 ก.ค.) — พิกัดที่คลิกคือข้อมูลชิ้นเดียว
+        ที่บอกได้ว่าคนหมายถึงตัวไหน ห้ามทิ้ง"""
         self._abort = False
-        self.locked_label = label
+        self.locked_label = toy.label
+        self._anchor = (toy.cx, toy.cy)
         self.armed = False
         self.op = "lock"
         self._op_thread = threading.Thread(target=self._lock_sequence,
-                                           args=(label,), daemon=True)
+                                           args=(toy.label, self._anchor), daemon=True)
         self._op_thread.start()
 
-    def _lock_sequence(self, label):
+    def _lock_sequence(self, label, anchor):
         try:
             self._set_status(f"ACQUIRING: {label.upper()} ...", AMBER)
 
@@ -162,11 +165,12 @@ class TacticalUI:
             # ใช้ 0.30 + ประตู — ตัวที่ conf 0.25 คลิกได้แต่ล็อกไม่ได้ เกิดขึ้นได้จริง)
             det = aiming.aim_at(self.turret, self.cap, self.detector, label,
                                 on_frame, should_abort=lambda: self._abort,
-                                sweep=False)
+                                sweep=False, anchor=anchor)
             if det is None:
                 self.locked_label = None
                 self._set_status("LOCK FAILED  //  CLICK ANYWHERE ON SCREEN TO AIM", AMBER)
                 return
+            self._anchor = (det.cx, det.cy)   # จบที่ตัวไหน จอต้องเกาะตัวนั้นต่อ
             self.armed = True
             self._announce_armed(label.upper())
         except Exception as e:
@@ -405,9 +409,12 @@ class TacticalUI:
         cv2.circle(img, (cx, cy), 3, GREEN, -1)
         cv2.circle(img, (cx, cy), 60, GREEN_DIM, 1)
 
-    def _draw_lock(self, img, cx, cy, hw, hh, blink):
+    def _draw_lock(self, img, cx, cy, hw, hh, blink, text="LOCK"):
         """เป้าเล็งแดงแบบล็อกมิสไซล์ (ไม่มีเส้นตัดจากมุมจอแล้ว — รกตา)
-        ครอบกรอบตุ๊กตาที่ล็อก หรือครอบกลางจอ (โหมดพิกเซล)"""
+        ครอบกรอบตุ๊กตาที่ล็อก หรือครอบกลางจอ (โหมดพิกเซล)
+
+        text = ชนิด+conf ของตัวที่ล็อกจริง ไม่ใช่คำว่า LOCK เฉยๆ — คนยิงต้องเห็น
+        กับตาว่าระบบคิดว่ากำลังล็อกอะไรอยู่ ก่อนกด F (29 ก.ค.)"""
         phase = time.time() * 7
         pulse = int(6 + 9 * abs(math.sin(phase)))
         cv2.rectangle(img, (cx - hw, cy - hh), (cx + hw, cy + hh), RED, 2)
@@ -416,13 +423,18 @@ class TacticalUI:
         cv2.drawMarker(img, (cx, cy), RED, cv2.MARKER_DIAMOND, 18, 2)
         cv2.drawMarker(img, (cx, cy), RED, cv2.MARKER_CROSS, 36, 1)
         if blink:
-            txt = "v LOCK v"
+            txt = f"v {text} v"
             (tw, _), _ = cv2.getTextSize(txt, FONT, 0.6, 2)
             cv2.putText(img, txt, (cx - tw // 2, cy - hh - 14),
                         FONT, 0.6, RED, 2, cv2.LINE_AA)
 
-    def _draw_hint(self, img, d):
-        """กรอบ detection = "ตัวช่วยเล็ง" สีเขียว (โมเดลเห็นอะไร ไม่ใช่ตัวตัดสิน)"""
+    def _draw_hint(self, img, d, disputed=False):
+        """กรอบ detection = "ตัวช่วยเล็ง" สีเขียว (โมเดลเห็นอะไร ไม่ใช่ตัวตัดสิน)
+
+        disputed = ชนิดนี้โผล่เกิน 1 กรอบ ซึ่งเป็นไปไม่ได้ในสนามจริง (ชนิดละตัว)
+        ⇒ ระบายเหลืองพร้อม "?" ให้คนรู้ว่าอย่างน้อยหนึ่งกรอบนี้ผิดแน่ ต้องเลือกเอง
+        ว่าตัวไหนของจริง (คลิกตัวไหน ป้อมไปตัวนั้น — ดู _start_lock)"""
+        color = AMBER if disputed else GREEN
         x1, y1 = int(d.cx - d.w_px / 2), int(d.cy - d.h_px / 2)
         x2, y2 = int(d.cx + d.w_px / 2), int(d.cy + d.h_px / 2)
         L = max(16, int(min(d.w_px, d.h_px) * 0.32))
@@ -430,14 +442,14 @@ class TacticalUI:
                                   (x1, y2, 1, -1), (x2, y2, -1, -1)):
             px += sx * 4
             py += sy * 4
-            cv2.line(img, (px, py), (px + sx * L, py), GREEN, 2)
-            cv2.line(img, (px, py), (px, py + sy * L), GREEN, 2)
+            cv2.line(img, (px, py), (px + sx * L, py), color, 2)
+            cv2.line(img, (px, py), (px, py + sy * L), color, 2)
         # ป้ายชื่อ+conf บนแถบเข้ม ให้อ่านชัดบนพื้นหลังอะไรก็ได้
-        label = f"{d.label.upper()} {int(d.conf * 100):02d}%"
+        label = f"{'? ' if disputed else ''}{d.label.upper()} {int(d.conf * 100):02d}%"
         (tw, th), _ = cv2.getTextSize(label, FONT, 0.55, 1)
         ly = max(th + 8, y1 - 6)
         cv2.rectangle(img, (x1, ly - th - 6), (x1 + tw + 8, ly + 2), (15, 35, 15), -1)
-        cv2.putText(img, label, (x1 + 4, ly - 2), FONT, 0.55, GREEN, 1, cv2.LINE_AA)
+        cv2.putText(img, label, (x1 + 4, ly - 2), FONT, 0.55, color, 1, cv2.LINE_AA)
 
     def _draw_chrome(self, img, blink):
         h, w = img.shape[:2]
@@ -471,17 +483,38 @@ class TacticalUI:
         img[:, :, 0] = cv2.convertScaleAbs(img[:, :, 0], alpha=0.75)   # B ลง 25%
         img[:, :, 2] = cv2.convertScaleAbs(img[:, :, 2], alpha=0.88)   # R ลง 12%
 
+    def _locked_det(self, dets):
+        """กรอบของ "ตัวที่ล็อกไว้" ในเฟรมนี้ — ชนิดเดียวกันและใกล้ anchor ที่สุด
+
+        เดิมวนทั้งลิสต์แล้วให้ตัวสุดท้ายที่ชื่อตรงชนะ: ถ้าโมเดลรายงานชื่อเดียวกัน
+        สองกรอบ (ช้างถูกอ่านเป็น capybara ด้วย) เป้าแดงจะกระโดดสลับไปมาระหว่าง
+        สองตัวทุกเฟรม ตอนนี้ detect_all ตัดให้เหลือชนิดละกรอบแล้ว ตรงนี้จึงเป็น
+        ตาข่ายชั้นสุดท้าย (และยังต้องมี เผื่อปิด config.UNIQUE_TARGETS ตอนซ้อม)"""
+        if not self.locked_label:
+            return None
+        same = [d for d in dets if d.label == self.locked_label]
+        if not same:
+            return None
+        if self._anchor is None:
+            best = max(same, key=lambda d: d.conf)
+        else:
+            ax, ay = self._anchor
+            best = min(same, key=lambda d: (d.cx - ax) ** 2 + (d.cy - ay) ** 2)
+        if self.op is None:
+            # ระหว่าง op == "lock" ลูปเล็งถือ anchor ชุดของมันเองอยู่ ห้ามแทรก
+            self._anchor = (best.cx, best.cy)
+        return best
+
     def render(self, frame, dets):
         img = frame.copy()
         self._tint(img)
         blink = int(time.time() * 2) % 2 == 0
 
-        locked_det = None
+        locked_det = self._locked_det(dets)
+        disputed = detector_mod.duplicate_labels(dets)
         for d in dets:
-            if self.locked_label and d.label == self.locked_label:
-                locked_det = d            # ตุ๊กตาที่ล็อก — เดี๋ยววาดแดงทับ
-            else:
-                self._draw_hint(img, d)   # ตัวอื่น = ตัวช่วยเขียว
+            if d is not locked_det:
+                self._draw_hint(img, d, d.label in disputed)
 
         manual = self.armed and self.locked_label is None
         if not manual:
@@ -489,10 +522,12 @@ class TacticalUI:
 
         if locked_det is not None:        # ล็อกตุ๊กตา: เป้าแดงเกาะตุ๊กตา
             self._draw_lock(img, int(locked_det.cx), int(locked_det.cy),
-                            int(locked_det.w_px / 2) + 6, int(locked_det.h_px / 2) + 6, blink)
+                            int(locked_det.w_px / 2) + 6, int(locked_det.h_px / 2) + 6,
+                            blink,
+                            f"{locked_det.label.upper()} {int(locked_det.conf * 100)}%")
         elif manual:                      # ล็อกพิกเซล: เป้าแดงที่จุด zero
             zx, zy = self._zero_px()
-            self._draw_lock(img, zx, zy, 34, 34, blink)
+            self._draw_lock(img, zx, zy, 34, 34, blink, "MANUAL")
 
         self._draw_chrome(img, blink)
         return img
@@ -528,8 +563,9 @@ class TacticalUI:
 
     # ---------- ลูปหลัก ----------
     def run(self):
-        win = "Copper Dome // Tactical"
-        cv2.namedWindow(win, cv2.WINDOW_AUTOSIZE)   # AUTOSIZE = 1:1 พิกัดคลิกตรงเฟรม
+        win = WINDOW                               # หน้าต่างเดียวกับจอบูต — ภาพกล้อง
+        cv2.namedWindow(win, cv2.WINDOW_AUTOSIZE)  # ขึ้นแทนที่เลย ไม่มีหน้าต่างเด้งซ้อน
+                                                   # AUTOSIZE = 1:1 พิกัดคลิกตรงเฟรม
         cv2.setMouseCallback(win, self.on_mouse)
         self._alive = True
         worker = threading.Thread(target=self._detect_worker, daemon=True)
@@ -644,5 +680,150 @@ class TacticalUI:
             cv2.destroyAllWindows()
 
 
+WINDOW = "Copper Dome // Tactical"
+
+
+def _prefetch(fn):
+    """เริ่มงานช้าไว้ล่วงหน้าบน thread แยก แล้วค่อยไปเก็บผลทีหลังด้วย _collect()
+
+    ทำไมคุ้ม: เปิดกล้อง Camo (~2-4s ส่วนใหญ่นั่งรอ stream ตื่น) กับจับมือ Arduino
+    (~2.5s ที่เป็น time.sleep ตรงๆ ใน hardware.Turret) ไม่ได้ใช้ CPU เลย ทับเวลา
+    กับ import torch + โหลดโมเดลได้สบาย ⇒ เวลาเปิดโปรแกรมเหลือประมาณ "ขาที่ช้าที่สุด"
+    แทนที่จะเป็นผลรวมของทุกขา
+
+    ปลอดภัยไหม: VideoCapture ถูกเปิด/อ่านข้าม thread อยู่แล้วในโปรแกรมนี้
+    (thread ล็อกเรียก cap.read() ระหว่าง aim_at) ส่วน pyfirmata2 ก็รัน reader
+    thread ของตัวเองอยู่แล้ว — ไม่ได้เพิ่มสมมติฐานใหม่
+    """
+    box = {}
+
+    def run():
+        try:
+            box["value"] = fn()
+        except BaseException as e:   # noqa: BLE001 — ส่งต่อให้ขั้นที่ไป collect โยนแทน
+            box["error"] = e
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return thread, box
+
+
+def _collect(pre):
+    """รอ prefetch ให้จบแล้วคืนผล — ถ้าข้างในพัง โยน exception เดิมออกมาตรงนี้
+    (จอบูตจะได้ขึ้น FAIL ที่ "ขั้นตอนที่เกี่ยวข้องจริง" ไม่ใช่ที่ขั้นแรกสุด)"""
+    thread, box = pre
+    thread.join()
+    if "error" in box:
+        raise box["error"]
+    return box["value"]
+
+
+def _safety_check(note):
+    """ตรวจสภาพก่อนปล่อยให้ยิง — ไม่บล็อก แต่ต้องเห็นชัดว่าอะไรยังไม่พร้อม"""
+    if config.LAUNCHER not in ("flywheel", "crossbow"):
+        raise ValueError(f"config.LAUNCHER = {config.LAUNCHER!r} ไม่ถูกต้อง")
+    if list(config.SCOPE_ZERO_OFFSET_PX) == [0, 0]:
+        # ยังยิงได้ (ต้องยิงถึงจะคาลิเบรตได้) แต่ห้ามเงียบ — นี่คือตัวที่ทำให้
+        # พลาดเป็นระบบทุกนัด ดู issue #16
+        note.warn("SCOPE ZERO NOT CALIBRATED - expect systematic miss")
+    else:
+        note(f"scope zero {tuple(config.SCOPE_ZERO_OFFSET_PX)}")
+    return True
+
+
+def bootstrap():
+    """เปิดอุปกรณ์ทุกชิ้นทีละขั้นโดยมีจอบูตรายงานความคืบหน้า แล้วคืน TacticalUI"""
+    if "--sim" in sys.argv:
+        mode, can_fire = "SIM", True
+    elif "--webcam" in sys.argv:
+        mode, can_fire = "TEST", False
+    else:
+        mode, can_fire = "LIVE", True
+
+    # เริ่มขาที่ช้าและไม่กิน CPU ไว้ก่อนเลย ให้วิ่งทับกับการโหลดโมเดล
+    pre_cam = pre_turret = None
+    if mode in ("LIVE", "TEST"):
+        import camera
+        pre_cam = _prefetch(camera.open_camera)
+    if mode == "LIVE":
+        import hardware
+        pre_turret = _prefetch(hardware.Turret)
+
+    def stage_software(note):
+        note("verifying model file")
+        tag = config.yolo_model_tag() if config.DETECTOR == "yolo" else "hsv detector"
+        note(tag)
+        return tag
+
+    def stage_neural(note):
+        return detector_mod.get_detector(note)
+
+    def stage_optics(note):
+        note("waiting for camera stream")
+        cap = _collect(pre_cam)
+        note(f"{config.FRAME_WIDTH}x{config.FRAME_HEIGHT}")
+        return cap
+
+    def stage_turret(note):
+        note("firmata handshake + servo center")
+        return _collect(pre_turret)
+
+    def stage_sim(note):
+        note("building simulated world")
+        import simulator
+        return simulator.create_sim()
+
+    def stage_no_turret(note):
+        note.warn("test mode - turret bypassed, cannot fire")
+        return _NullTurret()
+
+    if mode == "SIM":
+        stages = [
+            ("SIMULATION CORE", stage_sim),
+            # sim วาดเป้าเป็นสีทึบ YOLO มองไม่ออก — ใช้ HSV เหมือนเดิม
+            ("TARGET RECOGNITION", lambda note: detector_mod.HsvDetector()),
+            ("SAFETY INTERLOCK", _safety_check),
+        ]
+    else:
+        stages = [
+            ("FLIGHT SOFTWARE", stage_software),
+            ("NEURAL CORE", stage_neural),
+            ("OPTICAL SENSOR", stage_optics),
+            ("TURRET LINK", stage_turret if mode == "LIVE" else stage_no_turret),
+            ("SAFETY INTERLOCK", _safety_check),
+        ]
+
+    screen = bootscreen.BootScreen(WINDOW, config.FRAME_WIDTH, config.FRAME_HEIGHT,
+                                   subtitle=f"FIRE CONTROL SYSTEM  //  MODE {mode}")
+    results = screen.run(stages)
+
+    if mode == "SIM":
+        cap, turret = results[0]
+        detector = results[1]
+    else:
+        detector, cap, turret = results[1], results[2], results[3]
+    return TacticalUI(cap, turret, detector, mode, can_fire)
+
+
+def main():
+    if "--boot-demo" in sys.argv:      # ดูหน้าตาจอบูตโดยไม่ต้องต่ออุปกรณ์
+        bootscreen.demo(WINDOW, config.FRAME_WIDTH, config.FRAME_HEIGHT)
+        return 0
+    try:
+        ui = bootstrap()
+    except bootscreen.BootAborted:
+        cv2.destroyAllWindows()
+        print("[boot] ยกเลิกโดยผู้ใช้")
+        return 1
+    except Exception as e:
+        cv2.destroyAllWindows()
+        # ข้อความจริงเป็นภาษาไทย (เช่น คำแนะนำแก้ Camo จอดำใน camera.py) ซึ่งจอ
+        # OpenCV วาดไม่ได้ — ต้องมาโผล่ที่ console ให้ครบ (.bat มี pause รออ่านอยู่)
+        print(f"\n[boot] เปิดระบบไม่สำเร็จ: {e}\n")
+        return 1
+    ui.run()
+    return 0
+
+
 if __name__ == "__main__":
-    TacticalUI().run()
+    sys.exit(main())

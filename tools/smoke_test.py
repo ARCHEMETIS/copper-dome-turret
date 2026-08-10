@@ -123,6 +123,51 @@ def yolo_leg(failures):
         failures.append("ล้มเหลว [ตรวจ fixture YOLO]: ไม่มีรูป test ที่ผ่านเกณฑ์ให้เช็คเลย")
 
 
+def lock_leg(failures):
+    """ตรวจว่าล็อกเป้า "ตัวที่คนคลิก" ไม่ใช่ "ตัวที่โมเดลมั่นใจที่สุด" (บั๊กจริง 29 ก.ค.)
+
+    ฉากที่เกิดขึ้นจริง: คลิกคาปิบาร่า แต่ป้อมหันไปหาช้าง เพราะช้างถูกอ่านเป็น
+    capybara ด้วย conf สูงกว่าตัวจริง — กันไว้ 2 ชั้น ทดสอบด้วยกรอบสังเคราะห์
+    (ไม่ต้องใช้โมเดล เร็ว และ reproduce ฉากนี้ด้วยรูปจริงยาก)
+    """
+    from detector import Detection, duplicate_labels, suppress_conflicts
+
+    elephant = Detection("elephant", 900, 400, 200, 180, 0.88)
+    ghost = Detection("capybara", 905, 402, 190, 175, 0.62)   # ผีทับตัวช้าง
+    real = Detection("capybara", 300, 410, 150, 150, 0.44)    # ตัวจริง conf ต่ำกว่า
+    dino = Detection("dino", 600, 400, 160, 200, 0.91)
+
+    # ชั้นที่ 1 — ผีที่ "ทับ" ของจริงคนละชื่อ ต้องแพ้ให้ชื่อที่ conf สูงกว่า
+    kept = suppress_conflicts([elephant, ghost, real, dino])
+    if ghost in kept:
+        failures.append("ล้มเหลว [ล็อกเป้า]: ผี capybara ที่ทับตัวช้างไม่ถูกตัดทิ้ง")
+    if real not in kept:
+        failures.append("ล้มเหลว [ล็อกเป้า]: capybara ตัวจริงถูกตัดทิ้งไปด้วย")
+    if len(kept) != 3:
+        failures.append(f"ล้มเหลว [ล็อกเป้า]: ควรเหลือ 3 กรอบ ได้ {len(kept)}")
+
+    # ชั้นที่ 2 — ผีที่ "ไม่ทับ" เป้าจริง suppress ไม่ช่วย ต้องพึ่ง anchor จากจุดที่คลิก
+    far_ghost = Detection("capybara", 1150, 300, 120, 120, 0.70)
+    cands = [d for d in suppress_conflicts([real, far_ghost, elephant, dino])
+             if d.label == "capybara"]
+    anchor = (real.cx, real.cy)   # คนคลิกที่ตัวจริง
+    picked = min(cands, key=lambda d: (d.cx - anchor[0]) ** 2 + (d.cy - anchor[1]) ** 2)
+    if picked is not real:
+        failures.append("ล้มเหลว [ล็อกเป้า]: การเลือกด้วย anchor ไม่ได้ตัวที่คนคลิก")
+    if max(cands, key=lambda d: d.conf) is not far_ghost:
+        failures.append("ล้มเหลว [ล็อกเป้า]: fixture เพี้ยน — ผีควรมี conf สูงกว่าตัวจริง")
+
+    # ⚠ กรอบที่ชนกันแบบชั้นที่ 2 ต้อง "ยังอยู่ครบ" ให้คนคลิกเลือกได้ ห้ามลบตัว conf ต่ำ
+    # (ตัวจริงมี conf ต่ำกว่าผีได้จริง — ลบแล้วคลิกล็อกตัวจริงไม่ได้เลย)
+    if real not in cands or far_ghost not in cands:
+        failures.append("ล้มเหลว [ล็อกเป้า]: กรอบชนิดซ้ำถูกลบทิ้ง คนจะคลิกตัวจริงไม่ได้")
+    if duplicate_labels(cands) != {"capybara"}:
+        failures.append("ล้มเหลว [ล็อกเป้า]: ไม่ได้ติดธงว่า capybara โผล่ซ้ำ (จอจะไม่เตือน)")
+
+    print(f"ล็อกเป้า | ตัดผีซ้อนชื่อเหลือ {len(kept)} กรอบ, "
+          "anchor เลือกตัวที่คลิกถูกต้อง, ชนิดซ้ำถูกติดธงเตือนโดยไม่ลบกรอบ")
+
+
 def ranging_leg(failures):
     """ทดสอบ ranging + ตัวแก้ตามท่า (ASPECT_CORRECTION) กับกรอบจริง 42 จุด
     จาก Distance/ranging_log.csv — ทุกจุดต้องเพี้ยนไม่เกิน ±12%
@@ -164,6 +209,7 @@ def ranging_leg(failures):
 
 def main():
     failures = []
+    lock_leg(failures)        # ไม่ใช้โมเดล/กล้อง — รันก่อนสุด รู้ผลทันที
     ranging_leg(failures)     # ต้องมาก่อน create_sim (sim เขียนทับ config)
     yolo_leg(failures)        # ต้องมาก่อน create_sim เช่นกัน (YOLO ใช้ calibration จริง)
 

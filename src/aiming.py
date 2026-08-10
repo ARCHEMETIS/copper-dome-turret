@@ -47,7 +47,7 @@ def _settle(cap, on_frame, det, should_abort=None):
 
 
 def aim_at(turret, cap, detector, target: str, on_frame=None, should_abort=None,
-           sweep: bool = True):
+           sweep: bool = True, anchor=None):
     """เล็งเป้าจนอยู่ที่จุด zero ของสโคป (ทั้งสองแกน)
 
     on_frame: callback(frame, detection|None) เอาไว้ให้ UI วาดภาพระหว่างเล็ง (ใส่หรือไม่ก็ได้)
@@ -57,6 +57,10 @@ def aim_at(turret, cap, detector, target: str, on_frame=None, should_abort=None,
            False = กรณีคนคลิกเลือกเป้าเอง (main_click) — คนหาเป้าให้แล้ว การกวาดมีแต่
            พาป้อมเดินหนีจากตุ๊กตาที่คนเห็นอยู่กับตา แล้วไปหมดเวลาที่อื่น ตอบ None
            ให้ UI บอก "ล็อกไม่ติด คลิกที่ว่างเพื่อเล็งเอง" เร็วๆ ดีกว่า
+    anchor: (cx, cy) ตำแหน่งตุ๊กตา "ตัวที่คนคลิก" — มีผลเมื่อโมเดลรายงานชนิดเดียวกัน
+            หลายกรอบ: เลือกกรอบที่ใกล้ anchor ที่สุด แทนกรอบที่ conf สูงสุด แล้ว
+            อัปเดต anchor ตามเป้าทุกรอบ = ล็อกเกาะ "ตัวที่ถูกชี้" ไปตลอด ไม่ใช่
+            เด้งไปหาตัวที่โมเดลบังเอิญมั่นใจกว่าในเฟรมนั้น (ปัญหาจริง 29 ก.ค.)
     คืนค่า Detection ล่าสุด (เล็งสำเร็จ) หรือ None (หาไม่เจอ/หมดเวลา/ถูกยกเลิก)
     """
     deadline = time.time() + config.AIM_TIMEOUT_S
@@ -77,7 +81,12 @@ def aim_at(turret, cap, detector, target: str, on_frame=None, should_abort=None,
             # กล้องหลุดแล้ว continue เปล่าๆ จะหมุน CPU เต็ม 12 วินาทีตาม AIM_TIMEOUT_S
             time.sleep(0.01)
             continue
-        det = detector.detect(frame, target)
+        det = detector.detect(frame, target, anchor=anchor)
+        if det is not None:
+            # เลื่อน anchor ตามเป้าทุกครั้งที่เห็น — กล้องติดลำกล้อง พอป้อมหมุน
+            # ตุ๊กตาตัวเดิมจะเลื่อนทั้งเฟรม ถ้าคา anchor ไว้ที่จุดคลิกเดิม พอหมุนไป
+            # ไกลๆ "ตัวที่ใกล้ anchor ที่สุด" จะกลายเป็นตัวอื่นแทน
+            anchor = (det.cx, det.cy)
         if on_frame:
             on_frame(frame, det)
 

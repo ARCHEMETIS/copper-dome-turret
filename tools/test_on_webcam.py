@@ -18,5 +18,6 @@ import main_click
 if __name__ == "__main__":
     if "--webcam" not in sys.argv:
         sys.argv.append("--webcam")   # บังคับโหมดกล้องจริง + ป้อมหลอก (ไม่ต่อ Arduino)
-    main_click.TacticalUI().run()
+    # ผ่าน main() เพื่อให้ได้จอบูต + การรายงาน error แบบเดียวกับวันแข่ง
+    sys.exit(main_click.main())
 
